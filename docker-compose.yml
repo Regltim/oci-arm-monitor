@@ -6,8 +6,8 @@ services:
     image: oci-arm-cost-monitor-server:latest
     container_name: oci-arm-cost-monitor-server
     restart: unless-stopped
-    ports:
-      - "9090:9090"
+    expose:
+      - "9090"
     environment:
       MONITOR_ADMIN_USERNAME: ${MONITOR_ADMIN_USERNAME:?MONITOR_ADMIN_USERNAME is required}
       MONITOR_ADMIN_PASSWORD: ${MONITOR_ADMIN_PASSWORD:?MONITOR_ADMIN_PASSWORD is required}
@@ -45,5 +45,28 @@ services:
         max-size: "20m"
         max-file: "5"
 
+  oci-arm-monitor-web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    image: oci-arm-monitor-web:latest
+    container_name: oci-arm-monitor-web
+    restart: unless-stopped
+    environment:
+      MONITOR_SITE_ADDRESS: ${MONITOR_SITE_ADDRESS:-:8080}
+    depends_on:
+      oci-arm-monitor-server:
+        condition: service_healthy
+    volumes:
+      - oci-arm-monitor-caddy-data:/data
+      - oci-arm-monitor-caddy-config:/config
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
 volumes:
   oci-arm-monitor-data:
+  oci-arm-monitor-caddy-data:
+  oci-arm-monitor-caddy-config:

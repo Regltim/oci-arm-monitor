@@ -1,0 +1,4 @@
+services:
+  oci-arm-monitor-web:
+    ports:
+      - "${MONITOR_HTTP_PORT:-8080}:8080"
