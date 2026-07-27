@@ -194,6 +194,8 @@ Allow group oci-monitor-readers to read metrics in tenancy
 Allow group oci-monitor-readers to read usage-report in tenancy
 ```
 
+实例直接位于根 Compartment 时，也应使用这组 `in tenancy` 策略。根 Compartment 的 OCID 与 Tenancy OCID 相同，不能写成 `in compartment id <Tenancy OCID>`。
+
 跑通后，建议再收窄成 5.1 或 5.2。
 
 ### 5.4 报错：Compartment xxx does not exist or is not part of the policy compartment subtree

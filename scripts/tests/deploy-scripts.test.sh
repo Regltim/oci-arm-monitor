@@ -64,6 +64,22 @@ test_cloud_shell_script_supports_dry_run() {
   assert_contains "${output}" "read usage-report in tenancy"
 }
 
+test_cloud_shell_script_supports_root_compartment() {
+  local output
+  local tenancy_id="ocid1.tenancy.oc1..exampletenancy"
+
+  output="$(bash "${ROOT_DIR}/scripts/oci-cloud-shell-setup.sh" \
+    --tenancy-id "${tenancy_id}" \
+    --instance-id "ocid1.instance.oc1.test.exampleinstance" \
+    --resource-compartment-id "${tenancy_id}" \
+    --dry-run 2>&1)" || return 1
+
+  assert_contains "${output}" "read instance-family in tenancy" || return 1
+  assert_contains "${output}" "read virtual-network-family in tenancy" || return 1
+  assert_contains "${output}" "read metrics in tenancy" || return 1
+  assert_not_contains "${output}" "in compartment id ${tenancy_id}"
+}
+
 test_instance_metadata_is_auto_detected() {
   local output
   local expected
@@ -133,6 +149,24 @@ test_instance_principal_init_uses_safe_defaults() {
   }
 
   rm -rf "${tmp_dir}"
+}
+
+test_init_deploy_root_compartment_uses_tenancy_scope() {
+  local output
+  local tenancy_id="ocid1.tenancy.oc1..exampletenancy"
+
+  output="$(
+    INIT_DEPLOY_LIB_ONLY=true bash -c '
+      source "$1"
+      DETECTED_OCI_INSTANCE_OCID="ocid1.instance.oc1.test.exampleinstance"
+      OCI_TENANCY_OCID="$2"
+      OCI_COMPARTMENT_OCID="$2"
+      print_instance_principal_policy_template
+    ' _ "${ROOT_DIR}/scripts/init-deploy.sh" "${tenancy_id}" 2>&1
+  )" || return 1
+
+  assert_contains "${output}" "read instance-family in tenancy" || return 1
+  assert_not_contains "${output}" "in compartment id ${tenancy_id}"
 }
 
 test_existing_private_value_is_not_echoed() {
@@ -212,8 +246,10 @@ test_public_release_check_rejects_untracked_sensitive_file() {
 }
 
 run_test "Cloud Shell IAM dry-run" test_cloud_shell_script_supports_dry_run
+run_test "Cloud Shell 支持根 Compartment" test_cloud_shell_script_supports_root_compartment
 run_test "实例 Metadata 自动识别" test_instance_metadata_is_auto_detected
 run_test "Instance Principal 初始化默认值" test_instance_principal_init_uses_safe_defaults
+run_test "初始化脚本支持根 Compartment" test_init_deploy_root_compartment_uses_tenancy_scope
 run_test "已有私有配置不回显" test_existing_private_value_is_not_echoed
 run_test "开源检查拦截私钥" test_public_release_check_rejects_sensitive_content
 run_test "开源检查允许占位数据" test_public_release_check_accepts_placeholder_data

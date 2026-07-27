@@ -95,6 +95,8 @@ bash scripts/oci-cloud-shell-setup.sh \
   --resource-compartment-id 'ocid1.compartment.oc1..replace-with-your-compartment-ocid'
 ```
 
+如果被监控实例直接位于根 Compartment，OCI Metadata 返回的 Compartment ID 会与 Tenancy OCID 相同。此时 `--resource-compartment-id` 直接填写与 `--tenancy-id` 相同的值，脚本会自动把实例、网络和指标权限生成成 `in tenancy`。
+
 脚本会创建或更新：
 
 - Dynamic Group：`oci-arm-monitor-instances`。

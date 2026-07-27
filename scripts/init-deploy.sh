@@ -366,6 +366,11 @@ validate_config() {
 
 print_instance_principal_policy_template() {
   local monitor_instance_ocid="${DETECTED_OCI_INSTANCE_OCID}"
+  local resource_scope="in compartment id ${OCI_COMPARTMENT_OCID}"
+
+  if [ "${OCI_COMPARTMENT_OCID}" = "${OCI_TENANCY_OCID}" ]; then
+    resource_scope="in tenancy"
+  fi
 
   info "Instance Principal 还需要创建 Dynamic Group 和 Policy。"
   if [ -z "${monitor_instance_ocid}" ]; then
@@ -380,9 +385,9 @@ print_instance_principal_policy_template() {
   fi
 
   printf "\n=== IAM Policy statements ===\n"
-  printf "Allow dynamic-group oci-arm-monitor-instances to read instance-family in compartment id %s\n" "${OCI_COMPARTMENT_OCID}"
-  printf "Allow dynamic-group oci-arm-monitor-instances to read virtual-network-family in compartment id %s\n" "${OCI_COMPARTMENT_OCID}"
-  printf "Allow dynamic-group oci-arm-monitor-instances to read metrics in compartment id %s\n" "${OCI_COMPARTMENT_OCID}"
+  printf "Allow dynamic-group oci-arm-monitor-instances to read instance-family %s\n" "${resource_scope}"
+  printf "Allow dynamic-group oci-arm-monitor-instances to read virtual-network-family %s\n" "${resource_scope}"
+  printf "Allow dynamic-group oci-arm-monitor-instances to read metrics %s\n" "${resource_scope}"
   printf "Allow dynamic-group oci-arm-monitor-instances to read usage-report in tenancy\n\n"
 
   if [ -n "${monitor_instance_ocid}" ]; then

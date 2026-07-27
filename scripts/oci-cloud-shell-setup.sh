@@ -30,7 +30,7 @@ usage() {
 选项：
   --tenancy-id OCID                 Tenancy OCID；省略时尝试读取 OCI CLI 配置
   --instance-id OCID                运行监控服务的 OCI Instance OCID
-  --resource-compartment-id OCID    被监控资源所在的 Compartment OCID
+  --resource-compartment-id OCID    被监控资源所在的 Compartment OCID；根 Compartment 传 Tenancy OCID
   --dynamic-group-name NAME         Dynamic Group 名称
   --policy-name NAME                IAM Policy 名称
   --dry-run                         只显示规则，不调用 OCI API
@@ -91,10 +91,24 @@ validate_ocid() {
   fi
 }
 
+validate_resource_compartment_id() {
+  if [ "${RESOURCE_COMPARTMENT_ID}" = "${TENANCY_ID}" ]; then
+    return 0
+  fi
+
+  validate_ocid "Compartment OCID" "${RESOURCE_COMPARTMENT_ID}" "compartment"
+}
+
 build_policy_statements() {
-  printf "Allow dynamic-group %s to read instance-family in compartment id %s\n" "${DYNAMIC_GROUP_NAME}" "${RESOURCE_COMPARTMENT_ID}"
-  printf "Allow dynamic-group %s to read virtual-network-family in compartment id %s\n" "${DYNAMIC_GROUP_NAME}" "${RESOURCE_COMPARTMENT_ID}"
-  printf "Allow dynamic-group %s to read metrics in compartment id %s\n" "${DYNAMIC_GROUP_NAME}" "${RESOURCE_COMPARTMENT_ID}"
+  local resource_scope="in compartment id ${RESOURCE_COMPARTMENT_ID}"
+
+  if [ "${RESOURCE_COMPARTMENT_ID}" = "${TENANCY_ID}" ]; then
+    resource_scope="in tenancy"
+  fi
+
+  printf "Allow dynamic-group %s to read instance-family %s\n" "${DYNAMIC_GROUP_NAME}" "${resource_scope}"
+  printf "Allow dynamic-group %s to read virtual-network-family %s\n" "${DYNAMIC_GROUP_NAME}" "${resource_scope}"
+  printf "Allow dynamic-group %s to read metrics %s\n" "${DYNAMIC_GROUP_NAME}" "${resource_scope}"
   printf "Allow dynamic-group %s to read usage-report in tenancy\n" "${DYNAMIC_GROUP_NAME}"
 }
 
@@ -231,13 +245,13 @@ main() {
 
   [ -n "${TENANCY_ID}" ] || ask_required TENANCY_ID "Tenancy OCID"
   [ -n "${INSTANCE_ID}" ] || ask_required INSTANCE_ID "监控服务器 Instance OCID"
-  [ -n "${RESOURCE_COMPARTMENT_ID}" ] || ask_required RESOURCE_COMPARTMENT_ID "被监控资源 Compartment OCID"
+  [ -n "${RESOURCE_COMPARTMENT_ID}" ] || ask_required RESOURCE_COMPARTMENT_ID "被监控资源 Compartment OCID；根 Compartment 可填 Tenancy OCID"
 
   validate_resource_name "Dynamic Group 名称" "${DYNAMIC_GROUP_NAME}"
   validate_resource_name "Policy 名称" "${POLICY_NAME}"
   validate_ocid "Tenancy OCID" "${TENANCY_ID}" "tenancy"
   validate_ocid "Instance OCID" "${INSTANCE_ID}" "instance"
-  validate_ocid "Compartment OCID" "${RESOURCE_COMPARTMENT_ID}" "compartment"
+  validate_resource_compartment_id
 
   print_preview
   if [ "${DRY_RUN}" = "true" ]; then
