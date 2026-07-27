@@ -151,6 +151,128 @@ normalize_auth_mode() {
   esac
 }
 
+normalize_access_mode() {
+  case "$1" in
+    1|http|HTTP)
+      printf "http"
+      ;;
+    2|https|HTTPS)
+      printf "https"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+validate_http_port() {
+  [[ "$1" =~ ^[0-9]+$ ]] && [ "$1" -ge 1 ] && [ "$1" -le 65535 ]
+}
+
+validate_hostname() {
+  local value="$1"
+  local label
+  local -a labels
+
+  [ -n "${value}" ] && [ "${#value}" -le 253 ] || return 1
+  [[ "${value}" != .* ]] && [[ "${value}" != *. ]] && [[ "${value}" != *..* ]] || return 1
+  IFS='.' read -r -a labels <<<"${value}"
+  for label in "${labels[@]}"; do
+    [[ "${label}" =~ ^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$ ]] || return 1
+  done
+}
+
+validate_http_host() {
+  local value="$1"
+  local octet
+  local -a octets
+
+  if [[ "${value}" =~ ^[0-9.]+$ ]]; then
+    [[ "${value}" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || return 1
+    IFS='.' read -r -a octets <<<"${value}"
+    for octet in "${octets[@]}"; do
+      [ "${octet}" -le 255 ] || return 1
+    done
+    return 0
+  fi
+
+  validate_hostname "${value}"
+}
+
+validate_https_domain() {
+  local value="$1"
+  local top_level_domain="${value##*.}"
+
+  [[ "${value}" == *.* ]] || return 1
+  validate_hostname "${value}" || return 1
+  [[ "${top_level_domain}" =~ ^[A-Za-z]{2,63}$ ]]
+}
+
+configure_http_access() {
+  local host="$1"
+  local port="$2"
+
+  validate_http_host "${host}" || return 1
+  validate_http_port "${port}" || return 1
+
+  COMPOSE_FILE="docker-compose.yml:docker-compose.http.yml"
+  MONITOR_ACCESS_MODE="http"
+  MONITOR_HTTP_HOST="${host}"
+  MONITOR_HTTP_PORT="${port}"
+  MONITOR_SITE_ADDRESS=":8080"
+  MONITOR_CORS_ALLOWED_ORIGINS="http://${host}:${port}"
+  MONITOR_COOKIE_SECURE="false"
+  MONITOR_ACCESS_URL="${MONITOR_CORS_ALLOWED_ORIGINS}"
+}
+
+configure_https_access() {
+  local domain="$1"
+
+  validate_https_domain "${domain}" || return 1
+
+  COMPOSE_FILE="docker-compose.yml:docker-compose.https.yml"
+  MONITOR_ACCESS_MODE="https"
+  MONITOR_HTTP_HOST=""
+  MONITOR_HTTP_PORT="8080"
+  MONITOR_SITE_ADDRESS="${domain}"
+  MONITOR_CORS_ALLOWED_ORIGINS="https://${domain}"
+  MONITOR_COOKIE_SECURE="true"
+  MONITOR_ACCESS_URL="${MONITOR_CORS_ALLOWED_ORIGINS}"
+}
+
+collect_access_settings() {
+  local mode_default
+  local selected_mode
+  local http_host
+  local http_port
+  local https_domain
+
+  mode_default="$(read_env_value MONITOR_ACCESS_MODE || true)"
+  mode_default="${mode_default:-http}"
+  while true; do
+    ask selected_mode "访问模式：1=HTTP + IP/主机名，2=HTTPS + 域名" "${mode_default}" true
+    selected_mode="$(normalize_access_mode "${selected_mode}")" || {
+      warn "访问模式只支持 http/1 或 https/2。"
+      continue
+    }
+
+    if [ "${selected_mode}" = "http" ]; then
+      http_host="$(read_env_value MONITOR_HTTP_HOST || true)"
+      http_port="$(read_env_value MONITOR_HTTP_PORT || true)"
+      ask_with_hidden_default http_host "服务器公网 IPv4 或主机名" "${http_host}" true
+      ask http_port "HTTP 访问端口" "${http_port:-8080}" true
+      configure_http_access "${http_host}" "${http_port}" && return 0
+      warn "HTTP 主机名或端口格式不正确。"
+    else
+      https_domain="$(read_env_value MONITOR_SITE_ADDRESS || true)"
+      [ "${https_domain}" = ":8080" ] && https_domain=""
+      ask_with_hidden_default https_domain "HTTPS 访问域名，不含协议和路径" "${https_domain}" true
+      configure_https_access "${https_domain}" && return 0
+      warn "HTTPS 域名格式不正确。"
+    fi
+  done
+}
+
 detect_instance_metadata() {
   local metadata
 
@@ -223,6 +345,11 @@ write_env_file() {
   local tmp_file="${ENV_FILE}.tmp"
 
   {
+    write_env_entry "COMPOSE_FILE" "${COMPOSE_FILE}"
+    write_env_entry "MONITOR_ACCESS_MODE" "${MONITOR_ACCESS_MODE}"
+    write_env_entry "MONITOR_HTTP_HOST" "${MONITOR_HTTP_HOST}"
+    write_env_entry "MONITOR_HTTP_PORT" "${MONITOR_HTTP_PORT}"
+    write_env_entry "MONITOR_SITE_ADDRESS" "${MONITOR_SITE_ADDRESS}"
     write_env_entry "MONITOR_ADMIN_USERNAME" "${MONITOR_ADMIN_USERNAME}"
     write_env_entry "MONITOR_ADMIN_PASSWORD" "${MONITOR_ADMIN_PASSWORD}"
     write_env_entry "MONITOR_COOKIE_SECURE" "${MONITOR_COOKIE_SECURE}"
@@ -403,23 +530,7 @@ main() {
   info "OCI ARM Monitor 快捷部署配置"
   info "项目目录：${ROOT_DIR}"
 
-  local default_origin
-  default_origin="$(read_env_value MONITOR_CORS_ALLOWED_ORIGINS)"
-  default_origin="${default_origin:-https://monitor.example.com}"
-
-  ask_with_hidden_default MONITOR_CORS_ALLOWED_ORIGINS "面板访问域名，例如 https://monitor.example.com" "${default_origin}" true
-
-  local cookie_default
-  cookie_default="$(read_env_value MONITOR_COOKIE_SECURE)"
-  if [ -z "${cookie_default}" ]; then
-    if [[ "${MONITOR_CORS_ALLOWED_ORIGINS}" == https://* ]]; then
-      cookie_default="true"
-    else
-      cookie_default="false"
-    fi
-  fi
-
-  ask MONITOR_COOKIE_SECURE "是否启用 Secure Cookie，HTTPS 填 true" "${cookie_default}" true
+  collect_access_settings
   local admin_username_default
   admin_username_default="$(read_env_value MONITOR_ADMIN_USERNAME || true)"
   admin_username_default="${admin_username_default:-admin}"
@@ -514,8 +625,10 @@ main() {
 
   info "下一步可以执行："
   printf "  docker compose config --quiet\n"
-  printf "  docker compose up -d --build oci-arm-monitor-server\n"
-  printf "  docker compose logs -f oci-arm-monitor-server\n"
+  printf "  docker compose up -d --build\n"
+  printf "  docker compose ps\n"
+  printf "  docker compose logs -f\n"
+  printf "\n启动后访问地址：%s\n" "${MONITOR_ACCESS_URL}"
 }
 
 if [ "${INIT_DEPLOY_LIB_ONLY:-false}" != "true" ]; then
