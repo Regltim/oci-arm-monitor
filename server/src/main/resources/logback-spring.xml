@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+  <property
+    name="CONSOLE_LOG_PATTERN"
+    value="%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] [%X{requestId:-no-request}] %logger{40} - %msg%n%ex"
+  />
+
+  <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+    <encoder>
+      <pattern>${CONSOLE_LOG_PATTERN}</pattern>
+      <charset>UTF-8</charset>
+    </encoder>
+  </appender>
+
+  <logger name="org.ociarmmonitor" level="${MONITOR_LOG_LEVEL:-INFO}" />
+  <logger name="com.oracle.bmc" level="${MONITOR_OCI_SDK_LOG_LEVEL:-WARN}" />
+  <logger name="org.springframework.web" level="WARN" />
+
+  <root level="${ROOT_LOG_LEVEL:-INFO}">
+    <appender-ref ref="CONSOLE" />
+  </root>
+</configuration>

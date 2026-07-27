@@ -1,0 +1,6 @@
+{
+  "id": "ocid1.instance.oc1.test.exampleinstance",
+  "compartmentId": "ocid1.compartment.oc1..examplecompartment",
+  "tenantId": "ocid1.tenancy.oc1..exampletenancy",
+  "canonicalRegionName": "us-example-1"
+}

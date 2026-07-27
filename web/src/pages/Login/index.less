@@ -1,0 +1,231 @@
+.login-page {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 28px;
+  overflow: hidden;
+  background:
+    linear-gradient(135deg, rgba(11, 21, 32, 0.98), rgba(19, 36, 49, 0.96)),
+    repeating-linear-gradient(90deg, rgba(238, 248, 246, 0.05) 0, rgba(238, 248, 246, 0.05) 1px, transparent 1px, transparent 58px),
+    repeating-linear-gradient(0deg, rgba(238, 248, 246, 0.04) 0, rgba(238, 248, 246, 0.04) 1px, transparent 1px, transparent 58px);
+}
+
+.login-shell {
+  width: min(100%, 1080px);
+  display: grid;
+  grid-template-columns: minmax(0, 1.08fr) minmax(360px, 0.72fr);
+  gap: 18px;
+  align-items: stretch;
+}
+
+.login-brand-panel,
+.login-panel {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(238, 248, 246, 0.14);
+  border-radius: 8px;
+  box-shadow: 0 30px 90px rgba(3, 10, 18, 0.36);
+}
+
+.login-brand-panel {
+  min-height: 560px;
+  padding: 42px;
+  color: #eef8f6;
+  background:
+    linear-gradient(135deg, rgba(29, 199, 174, 0.18), transparent 42%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.025));
+}
+
+.login-brand-panel::after {
+  position: absolute;
+  right: 34px;
+  bottom: 34px;
+  left: 34px;
+  height: 1px;
+  content: '';
+  background: linear-gradient(90deg, rgba(29, 199, 174, 0.68), rgba(238, 248, 246, 0.18), transparent);
+}
+
+.login-brand-mark {
+  width: 48px;
+  height: 48px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(29, 199, 174, 0.34);
+  border-radius: 8px;
+  background: rgba(29, 199, 174, 0.12);
+  color: #40e1cb;
+  font-size: 24px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+.login-kicker {
+  margin: 34px 0 10px;
+  color: rgba(238, 248, 246, 0.68);
+  font-size: 13px;
+  font-weight: 760;
+  letter-spacing: 0;
+}
+
+.login-brand-panel h1 {
+  max-width: 520px;
+  margin: 0;
+  color: #ffffff;
+  font-size: 44px;
+  line-height: 54px;
+  font-weight: 860;
+  letter-spacing: 0;
+  text-wrap: balance;
+}
+
+.login-summary {
+  max-width: 520px;
+  margin: 16px 0 0;
+  color: rgba(238, 248, 246, 0.72);
+  font-size: 16px;
+  line-height: 26px;
+}
+
+.login-guardrail-list {
+  position: absolute;
+  right: 42px;
+  bottom: 64px;
+  left: 42px;
+  display: grid;
+  gap: 12px;
+}
+
+.login-guardrail-item {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  padding: 13px 14px;
+  border: 1px solid rgba(238, 248, 246, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.055);
+}
+
+.login-guardrail-icon {
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  background: rgba(29, 199, 174, 0.12);
+  color: #40e1cb;
+  font-size: 18px;
+}
+
+.login-guardrail-item strong {
+  display: block;
+  color: #f7fffd;
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 800;
+}
+
+.login-guardrail-item small {
+  display: block;
+  margin-top: 2px;
+  color: rgba(238, 248, 246, 0.65);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.login-panel {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 34px;
+  background: rgba(251, 252, 253, 0.98);
+}
+
+.login-panel-header {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  margin-bottom: 30px;
+}
+
+.login-lock-icon {
+  width: 42px;
+  height: 42px;
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid rgba(23, 120, 107, 0.18);
+  border-radius: 8px;
+  background: rgba(23, 120, 107, 0.09);
+  color: #17786b;
+  font-size: 20px;
+}
+
+.login-panel h2 {
+  margin: 0;
+  color: #14212b;
+  font-size: 24px;
+  line-height: 30px;
+  font-weight: 840;
+  letter-spacing: 0;
+}
+
+.login-panel p {
+  margin: 5px 0 0;
+  color: #637381;
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.login-panel .ant-form-item {
+  margin-bottom: 20px;
+}
+
+.login-panel .ant-form-item-label > label {
+  color: #334554;
+  font-weight: 760;
+}
+
+.login-panel .ant-input,
+.login-panel .ant-input-affix-wrapper {
+  min-height: 42px;
+  border-radius: 8px;
+}
+
+.login-submit-button.ant-btn {
+  height: 44px;
+  margin-top: 4px;
+  font-weight: 800;
+}
+
+@media (max-width: 860px) {
+  .login-page {
+    align-items: start;
+    padding: 18px;
+    overflow: auto;
+  }
+
+  .login-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .login-brand-panel {
+    min-height: auto;
+    padding: 28px;
+  }
+
+  .login-brand-panel h1 {
+    font-size: 32px;
+    line-height: 40px;
+  }
+
+  .login-guardrail-list {
+    position: static;
+    margin-top: 28px;
+  }
+
+  .login-panel {
+    padding: 26px;
+  }
+}

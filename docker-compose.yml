@@ -1,0 +1,49 @@
+services:
+  oci-arm-monitor-server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    image: oci-arm-cost-monitor-server:latest
+    container_name: oci-arm-cost-monitor-server
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    environment:
+      MONITOR_ADMIN_USERNAME: ${MONITOR_ADMIN_USERNAME:?MONITOR_ADMIN_USERNAME is required}
+      MONITOR_ADMIN_PASSWORD: ${MONITOR_ADMIN_PASSWORD:?MONITOR_ADMIN_PASSWORD is required}
+      MONITOR_COOKIE_SECURE: ${MONITOR_COOKIE_SECURE:-false}
+      MONITOR_CORS_ALLOWED_ORIGINS: ${MONITOR_CORS_ALLOWED_ORIGINS:-http://localhost:8000,http://127.0.0.1:8000}
+      OCI_MONITOR_DB: /data/oci-arm-cost-monitor.db
+      OCI_AUTH_MODE: ${OCI_AUTH_MODE:-instance_principal}
+      OCI_CONFIG_FILE_PATH: /home/monitor/.oci/config
+      OCI_CONFIG_PROFILE: ${OCI_CONFIG_PROFILE:-DEFAULT}
+      OCI_REGION: ${OCI_REGION:?OCI_REGION is required}
+      OCI_COMPARTMENT_OCID: ${OCI_COMPARTMENT_OCID:?OCI_COMPARTMENT_OCID is required}
+      OCI_TENANCY_OCID: ${OCI_TENANCY_OCID:-}
+      MONITOR_OCI_CONNECT_TIMEOUT_MILLIS: ${MONITOR_OCI_CONNECT_TIMEOUT_MILLIS:-10000}
+      MONITOR_OCI_READ_TIMEOUT_MILLIS: ${MONITOR_OCI_READ_TIMEOUT_MILLIS:-60000}
+      MONITOR_LOG_LEVEL: ${MONITOR_LOG_LEVEL:-INFO}
+      MONITOR_OCI_SDK_LOG_LEVEL: ${MONITOR_OCI_SDK_LOG_LEVEL:-WARN}
+      MONITOR_SERVER_METRICS_ENABLED: ${MONITOR_SERVER_METRICS_ENABLED:-true}
+      MONITOR_SERVER_METRICS_SAMPLE_DELAY_MILLIS: ${MONITOR_SERVER_METRICS_SAMPLE_DELAY_MILLIS:-15000}
+      MONITOR_SERVER_HISTORY_RETENTION_HOURS: ${MONITOR_SERVER_HISTORY_RETENTION_HOURS:-72}
+      MONITOR_SERVER_PROC_PATH: /host/proc
+      MONITOR_SERVER_DISK_PATH: /data
+    volumes:
+      - oci-arm-monitor-data:/data
+      - ${OCI_CONFIG_DIR:-./deploy/oci}:/home/monitor/.oci:ro
+      - /proc:/host/proc:ro
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 5 bash -c '</dev/tcp/127.0.0.1/9090' || exit 1"]
+      interval: 30s
+      timeout: 8s
+      retries: 5
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+volumes:
+  oci-arm-monitor-data:
