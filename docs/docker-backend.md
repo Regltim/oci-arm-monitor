@@ -1,96 +1,109 @@
-# 后端 Docker 部署说明
+# Docker 容器与数据说明
 
-后端容器只运行 Spring Boot 服务，不包含前端静态文件。前端仍可以单独构建后放到 Nginx，Nginx 反代 `/api/` 到后端容器的 `9090` 端口。
+默认 `docker compose up -d --build` 会同时启动前端和后端。服务器不需要单独安装 Java、Node.js 或 Web 代理。
 
-如果后端部署在 Oracle Cloud 实例本机，优先使用 [快速部署配置](quick-deploy.md) 的 Instance Principal 模式，不需要 API Key 和服务器私钥。
+## 1. 服务组成
 
-## 1. 文件说明
+| 服务 | 作用 | 宿主机端口 |
+| --- | --- | --- |
+| `oci-arm-monitor-web` | Caddy、前端静态页面、`/api/*` 反向代理、自动 HTTPS | HTTP 模式为所选端口；HTTPS 模式为 `80/443` |
+| `oci-arm-monitor-server` | Spring Boot、SQLite、OCI 同步、定时任务 | 默认不发布，Docker 内网 `9090` |
+
+后端健康后 Web 服务才会启动。两个容器均使用 `restart: unless-stopped`，日志默认单文件 20 MB、保留 5 个文件。
+
+## 2. 配置文件
 
 ```text
-server/Dockerfile       后端多阶段构建镜像
-server/.dockerignore    后端构建上下文忽略规则
-docker-compose.yml      后端容器启动示例
-.env.example            环境变量示例
+docker-compose.yml          两个服务、网络、健康检查和数据卷
+docker-compose.http.yml     HTTP 入口端口
+docker-compose.https.yml    HTTPS 入口端口 80/443
+.env                        当前服务器私密配置，不进入 Git
+.env.example                公共占位示例
+server/Dockerfile           后端镜像
+web/Dockerfile              前端构建和 Caddy 运行镜像
+web/Caddyfile               静态页面和 API 代理规则
 ```
 
-镜像运行阶段：
-
-- Java 17 JRE
-- 非 root 用户 `monitor`
-- 默认数据库路径 `/data/oci-arm-cost-monitor.db`
-- 默认 OCI config 路径 `/home/monitor/.oci/config`
-
-## 2. 准备 `.env`
-
-复制示例文件：
+推荐通过脚本生成 `.env`：
 
 ```bash
-cp .env.example .env
+bash scripts/init-deploy.sh
 ```
 
-修改：
+初始化脚本负责让这些配置保持一致：
+
+- `COMPOSE_FILE`
+- `MONITOR_ACCESS_MODE`
+- `MONITOR_SITE_ADDRESS`
+- `MONITOR_CORS_ALLOWED_ORIGINS`
+- `MONITOR_COOKIE_SECURE`
+
+不要分别手工修改这些值，否则可能导致入口端口、Origin 或 Cookie 冲突。
+
+## 3. 启动与日志
 
 ```bash
-MONITOR_ADMIN_USERNAME=admin
-MONITOR_ADMIN_PASSWORD=替换为强密码
-MONITOR_COOKIE_SECURE=false
-MONITOR_CORS_ALLOWED_ORIGINS=https://monitor.example.com
-OCI_AUTH_MODE=instance_principal
-OCI_CONFIG_PROFILE=DEFAULT
-OCI_REGION=ap-seoul-1
-OCI_COMPARTMENT_OCID=ocid1.compartment.oc1..替换为目标CompartmentOCID
-OCI_TENANCY_OCID=ocid1.tenancy.oc1..替换为TenancyOCID
-OCI_CONFIG_DIR=./deploy/oci
-MONITOR_OCI_CONNECT_TIMEOUT_MILLIS=10000
-MONITOR_OCI_READ_TIMEOUT_MILLIS=60000
-MONITOR_LOG_LEVEL=INFO
-MONITOR_OCI_SDK_LOG_LEVEL=WARN
-MONITOR_SERVER_METRICS_ENABLED=true
-MONITOR_SERVER_METRICS_SAMPLE_DELAY_MILLIS=15000
-MONITOR_SERVER_HISTORY_RETENTION_HOURS=72
+docker compose config --quiet
+docker compose up -d --build
+docker compose ps
 ```
 
-说明：
-
-- `MONITOR_ADMIN_USERNAME` / `MONITOR_ADMIN_PASSWORD` 只在数据库还没有管理员账号时用于初始化账号。
-- 公网 HTTPS 部署时把 `MONITOR_COOKIE_SECURE` 改为 `true`。
-- `MONITOR_CORS_ALLOWED_ORIGINS` 填前端访问域名，例如 `https://monitor.example.com`；多个域名用英文逗号分隔。
-- `OCI_AUTH_MODE` 是 OCI 认证模式。Oracle 实例本机部署推荐 `instance_principal`；非 Oracle 服务器部署使用 `config_file`。
-- `OCI_REGION` 是资源所在区域，例如 `ap-seoul-1`。
-- `OCI_COMPARTMENT_OCID` 是要同步的目标 compartment OCID。
-- `OCI_TENANCY_OCID` 是 tenancy OCID。`instance_principal` 模式下费用同步必填；`config_file` 模式可留空，Usage API 会优先使用 OCI config 里的 tenancy。
-- `OCI_CONFIG_DIR` 是宿主机上存放 OCI config 和私钥的目录，会只读挂载到容器内。`config_file` 模式才需要真实 config 和私钥。
-- `MONITOR_OCI_CONNECT_TIMEOUT_MILLIS` 是 OCI SDK 连接超时，默认 10 秒。
-- `MONITOR_OCI_READ_TIMEOUT_MILLIS` 是 OCI SDK 读取超时，默认 60 秒。
-- `MONITOR_LOG_LEVEL` 是业务日志级别，默认 `INFO`。
-- `MONITOR_OCI_SDK_LOG_LEVEL` 是 Oracle SDK 日志级别，默认 `WARN`，排查 SDK 细节时可临时改成 `INFO`。
-- `MONITOR_SERVER_METRICS_ENABLED` 是否启用本机服务器状态采样，默认 `true`。
-- `MONITOR_SERVER_METRICS_SAMPLE_DELAY_MILLIS` 服务器状态采样间隔，默认 15 秒。
-- `MONITOR_SERVER_HISTORY_RETENTION_HOURS` 服务器状态历史保留小时数，默认 72 小时。
-- Oracle/OCI 凭据和部署级配置只在后端 `.env` 与挂载目录中保存，前端不会保存或提交这些字段。
-
-## 3. 准备 OCI config
-
-推荐在项目目录下创建部署专用目录：
+查看日志：
 
 ```bash
-mkdir -p deploy/oci
-cp ~/.oci/config deploy/oci/config
-cp ~/.oci/oci_api_key.pem deploy/oci/oci_api_key.pem
+docker compose logs -f
+docker compose logs --tail=200 oci-arm-monitor-web
+docker compose logs --tail=300 oci-arm-monitor-server
 ```
 
-如果你的 `config` 里 `key_file` 原来是宿主机路径，需要改成容器内路径：
+同步任务通过后端日志输出当前步骤。HTTP 响应带 `X-Request-Id`，可在日志中按该值定位请求：
+
+```bash
+docker compose logs --tail=300 oci-arm-monitor-server | grep '<X-Request-Id>'
+```
+
+服务端不会记录请求体、Cookie、密码、Token 或 OCI 私钥内容。
+
+## 4. 数据卷
+
+Compose 定义三个命名卷：
+
+| 卷 | 内容 |
+| --- | --- |
+| `oci-arm-monitor-data` | SQLite 数据库 |
+| `oci-arm-monitor-caddy-data` | 证书和 Caddy 运行状态 |
+| `oci-arm-monitor-caddy-config` | Caddy 持久配置状态 |
+
+重新构建或替换容器不会删除命名卷。以下命令会删除容器但保留卷：
+
+```bash
+docker compose down
+```
+
+不要在有数据的环境执行 `docker compose down --volumes`，除非已经完成备份并明确要清空数据。
+
+## 5. OCI 配置挂载
+
+### Instance Principal
+
+不需要 `deploy/oci/config` 和 API 私钥。后端通过 OCI Instance Metadata 和 Dynamic Group 身份访问 API。
+
+### config_file
+
+宿主机目录默认只读挂载到 `/home/monitor/.oci`：
+
+```text
+deploy/oci/config
+deploy/oci/oci_api_key.pem
+```
+
+`config` 中的 `key_file` 必须是容器路径：
 
 ```ini
-[DEFAULT]
-user=ocid1.user.oc1..替换为用户OCID
-fingerprint=替换为fingerprint
-tenancy=ocid1.tenancy.oc1..替换为租户OCID
-region=ap-seoul-1
 key_file=/home/monitor/.oci/oci_api_key.pem
 ```
 
-容器内使用非 root 用户 `monitor`，UID/GID 默认是 `10001`。为了让容器能读取只读挂载的私钥，宿主机上执行：
+后端容器使用 UID/GID `10001`：
 
 ```bash
 sudo chown -R 10001:10001 deploy/oci
@@ -98,136 +111,107 @@ sudo chmod 700 deploy/oci
 sudo chmod 600 deploy/oci/config deploy/oci/oci_api_key.pem
 ```
 
-`deploy/oci/` 已加入 `.gitignore`，不要提交私钥。
+## 6. 服务器状态采集
 
-## 4. 启动后端
+后端只读挂载宿主机 `/proc`：
 
-构建并启动：
+```yaml
+- /proc:/host/proc:ro
+```
+
+用于读取宿主机 CPU、内存、网络和运行时间。SQLite 所在 `/data` 用于磁盘容量统计。
+
+## 7. 仅启动后端
+
+仅用于排障或接入已有外部 Web 代理：
 
 ```bash
 docker compose up -d --build oci-arm-monitor-server
-```
-
-查看日志：
-
-```bash
 docker compose logs -f oci-arm-monitor-server
 ```
 
-同步 OCI 数据时，`/api/sync/full` 只负责启动后台任务。实际进度通过 `/api/sync/status` 和容器日志查看：
-
-```bash
-docker compose logs --tail=300 oci-arm-monitor-server
-```
-
-日志中会输出 `OCI sync run ... progress`，用于判断同步卡在实例、VNIC、Monitoring 指标还是 Usage API 费用步骤。
-
-自动同步默认已启用，默认 Cron 为：
-
-```text
-0 0 0 * * *
-```
-
-时区为 `Asia/Shanghai`，也就是每天凌晨 00:00 执行一次。可在前端「同步中心」修改 Cron、时区、是否服务启动后同步一次，并查看同步历史。
-
-服务器状态页面需要读取宿主机 `/proc`。Compose 已包含只读挂载：
+默认情况下后端 `9090` 仍然只在 Docker 网络内可用。如果需要从宿主机访问，创建本地覆盖文件：
 
 ```yaml
-volumes:
-  - /proc:/host/proc:ro
+# docker-compose.backend-local.yml
+services:
+  oci-arm-monitor-server:
+    ports:
+      - "127.0.0.1:9090:9090"
 ```
 
-升级到新版本后建议强制重建容器，确保挂载生效：
+然后显式启动：
 
 ```bash
-docker compose up -d --build --force-recreate oci-arm-monitor-server
+docker compose \
+  -f docker-compose.yml \
+  -f docker-compose.backend-local.yml \
+  up -d --build oci-arm-monitor-server
 ```
 
-每个 HTTP 请求也会输出一行请求日志，包含 method、path、status、耗时、clientIp 和 `requestId`。响应头会带 `X-Request-Id`，浏览器 Network 面板里可以复制这个值再去容器日志里搜索。
+不要把 `9090` 绑定到 `0.0.0.0`，否则可能绕过 Web 入口直接暴露 API。
+
+## 8. 更新镜像
 
 ```bash
-docker compose logs --tail=300 oci-arm-monitor-server | grep '<X-Request-Id>'
-```
-
-服务端不会记录请求体、Cookie、密码、Token 或 OCI 私钥内容。Docker 日志已配置轮转，默认单文件 20MB，保留 5 个文件。
-
-查看状态：
-
-```bash
+git pull --ff-only
+docker compose up -d --build
 docker compose ps
 ```
 
-后端地址：
-
-```text
-http://服务器IP:9090/api
-```
-
-如果只允许 Nginx 本机反代访问，可以把 `docker-compose.yml` 里的端口改成：
-
-```yaml
-ports:
-  - "127.0.0.1:9090:9090"
-```
-
-## 5. 直接 Docker 命令
-
-不用 compose 时：
+强制重新创建但保留数据卷：
 
 ```bash
-docker build -t oci-arm-cost-monitor-server:latest ./server
-
-docker volume create oci-arm-monitor-data
-
-docker run -d \
-  --name oci-arm-cost-monitor-server \
-  --restart unless-stopped \
-  -p 9090:9090 \
-  -e MONITOR_ADMIN_USERNAME=admin \
-  -e MONITOR_ADMIN_PASSWORD='替换为强密码' \
-  -e MONITOR_COOKIE_SECURE=false \
-  -e MONITOR_CORS_ALLOWED_ORIGINS='https://monitor.example.com' \
-  -e OCI_MONITOR_DB=/data/oci-arm-cost-monitor.db \
-  -e OCI_AUTH_MODE=instance_principal \
-  -e OCI_CONFIG_FILE_PATH=/home/monitor/.oci/config \
-  -e OCI_CONFIG_PROFILE=DEFAULT \
-  -e OCI_REGION=ap-seoul-1 \
-  -e OCI_TENANCY_OCID='替换为TenancyOCID' \
-  -e OCI_COMPARTMENT_OCID='替换为目标CompartmentOCID' \
-  -e MONITOR_OCI_CONNECT_TIMEOUT_MILLIS=10000 \
-  -e MONITOR_OCI_READ_TIMEOUT_MILLIS=60000 \
-  -e MONITOR_SERVER_METRICS_ENABLED=true \
-  -e MONITOR_SERVER_METRICS_SAMPLE_DELAY_MILLIS=15000 \
-  -e MONITOR_SERVER_HISTORY_RETENTION_HOURS=72 \
-  -e MONITOR_SERVER_PROC_PATH=/host/proc \
-  -e MONITOR_SERVER_DISK_PATH=/data \
-  -v oci-arm-monitor-data:/data \
-  -v "$PWD/deploy/oci:/home/monitor/.oci:ro" \
-  -v /proc:/host/proc:ro \
-  oci-arm-cost-monitor-server:latest
+docker compose up -d --build --force-recreate
 ```
 
-## 6. 升级后端镜像
+## 9. 备份 SQLite
+
+获取实际卷名：
 
 ```bash
-docker compose build oci-arm-monitor-server
-docker compose up -d oci-arm-monitor-server
+docker inspect oci-arm-cost-monitor-server \
+  --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}'
 ```
 
-SQLite 数据在 Docker named volume `oci-arm-monitor-data` 中，不会因为重新构建镜像丢失。
-
-## 7. 备份 SQLite
+为保证文件一致，先停止后端，再用只读方式复制数据库：
 
 ```bash
+mkdir -p backups
+docker compose stop oci-arm-monitor-server
+
 docker run --rm \
-  -v oci-arm-cost-monitor_oci-arm-monitor-data:/data \
+  -v <data-volume-name>:/data:ro \
   -v "$PWD/backups:/backups" \
   busybox \
   sh -c 'cp /data/oci-arm-cost-monitor.db /backups/oci-arm-cost-monitor-$(date +%Y%m%d%H%M%S).db'
+
+docker compose start oci-arm-monitor-server
 ```
 
-如果 compose 项目名不是默认目录名，volume 名可能不同，可用下面命令确认：
+把 `<data-volume-name>` 替换成第一条命令输出。
+
+## 10. 常用检查
+
+查看端口：
 
 ```bash
-docker volume ls | grep oci-arm-monitor-data
+docker compose port oci-arm-monitor-web 8080
+docker compose port oci-arm-monitor-web 443
+docker compose port oci-arm-monitor-server 9090
+```
+
+HTTP 模式只有 Web 的 HTTP 端口有结果；HTTPS 模式只有 Web 的 `80/443` 有结果；后端 `9090` 默认无结果。
+
+查看数据卷：
+
+```bash
+docker volume ls | grep oci-arm-monitor
+```
+
+查看健康状态：
+
+```bash
+docker inspect oci-arm-cost-monitor-server \
+  --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}'
 ```

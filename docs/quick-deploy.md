@@ -1,92 +1,135 @@
 # Oracle ARM 两步快速部署
 
-这份文档适合把监控面板部署在 Oracle Cloud ARM 实例本机。
+本指南适合把 OCI ARM Monitor 部署在 Oracle Cloud Compute 实例本机。推荐使用 Instance Principal，服务器无需保存 OCI API 私钥。
 
-推荐使用 `Instance Principal`：服务器不保存 OCI 私钥，OCI Console Cloud Shell 只负责创建 Dynamic Group 和只读 Policy，ARM 实例终端负责生成配置和启动应用。
+部署分为两部分：
 
 ```text
-OCI Cloud Shell                    Oracle ARM 实例
-创建 Dynamic Group / Policy       读取 Instance Metadata
-                                  生成 .env 并启动应用
+ARM 实例终端                         OCI Cloud Shell
+运行初始化脚本                       创建 Dynamic Group 和只读 Policy
+启动 Docker Compose                  不接触应用数据库和管理员密码
 ```
 
-Cloud Shell 是 OCI 托管终端，不是目标 ARM 实例。它不会替你启动 Docker，也不会读取项目数据库。
+## 1. 准备服务器
 
-## 0. 先确认服务器使用最新源码
+需要：
 
-如果项目通过 Git 克隆，先在服务器项目目录执行：
+- Linux ARM 实例。
+- Docker 和 Docker Compose。
+- `curl`、`jq` 和 `git`。
+- HTTP 模式放行所选 TCP 端口，默认 `8080`；或 HTTPS 模式放行 TCP `80/443`。
+
+Ubuntu / Debian 安装基础工具：
+
+```bash
+sudo apt update
+sudo apt install -y curl jq git
+```
+
+Oracle Linux 安装基础工具：
+
+```bash
+sudo dnf install -y curl jq git
+```
+
+确认 Docker 可用：
+
+```bash
+docker --version
+docker compose version
+```
+
+## 2. 获取项目
+
+```bash
+git clone <repository-url> oci-arm-monitor
+cd oci-arm-monitor
+```
+
+已有部署目录更新时先确认本地没有未处理的修改：
 
 ```bash
 git status --short
 git pull --ff-only
 ```
 
-如果 `git rev-parse --is-inside-work-tree` 提示不是 Git 工作区，当前目录通常来自 GitHub ZIP。请重新下载最新 ZIP 到新目录，再保留服务器本机的 `.env`、`deploy/oci/` 和持久化数据；不要把这些私有文件上传到仓库。
+服务器本机的 `.env`、`deploy/oci/` 和 Docker volume 不应上传到代码仓库。
 
-执行初始化前可以核对提示文案：
-
-```bash
-grep -n "面板访问域名" scripts/init-deploy.sh
-```
-
-当前版本应使用 `https://monitor.example.com` 作为公开示例。若仍出现其他示例域名，说明服务器源码尚未更新。已有 `.env` 中的域名和 OCI 标识只会显示为“已设置，回车保留”，不会作为默认值直接回显。
-
-## 1. ARM 实例自动生成配置
-
-确认项目已经放到 ARM 实例，例如：
-
-```bash
-cd /opt/oci-arm-cost-monitor
-```
-
-初始化脚本使用 `curl` 和 `jq` 读取 OCI Instance Metadata。Ubuntu / Debian 安装：
-
-```bash
-sudo apt update
-sudo apt install -y curl jq
-```
-
-Oracle Linux 安装：
-
-```bash
-sudo dnf install -y curl jq
-```
-
-执行：
+## 3. 初始化应用
 
 ```bash
 bash scripts/init-deploy.sh
 ```
 
-认证模式保留默认值：
+访问模式二选一：
+
+### HTTP
+
+适合首次验证、受信网络或已有上层网络保护的环境。
+
+```text
+访问模式：http
+服务器公网 IPv4 或主机名：203.0.113.10
+HTTP 访问端口：8080
+```
+
+启动后访问：
+
+```text
+http://203.0.113.10:8080
+```
+
+### HTTPS
+
+适合公网长期运行。输入不带协议、端口和路径的域名：
+
+```text
+访问模式：https
+HTTPS 访问域名：monitor.example.com
+```
+
+开始部署前确认：
+
+- 域名 A/AAAA 记录指向当前服务器。
+- OCI Security List 或 NSG 放行 TCP `80` 和 `443`。
+- 操作系统防火墙放行 TCP `80` 和 `443`。
+- 服务器上的 `80/443` 没有被其他服务占用。
+
+Caddy 会自动申请和续期证书。启动后访问：
+
+```text
+https://monitor.example.com
+```
+
+## 4. 确认 OCI 配置
+
+认证模式保留推荐值：
 
 ```text
 instance_principal
 ```
 
-脚本会自动读取：
+脚本会从 OCI Instance Metadata 自动读取：
 
 - 当前服务器的 Instance OCID。
 - Tenancy OCID。
 - 当前实例所在 Compartment OCID。
 - OCI canonical region。
 
-你只需要确认面板域名、管理员账号和密码。如果被监控资源不在当前实例的 Compartment，可在提示时替换成目标 Compartment OCID。脚本读取到已有私有配置时不会把域名、OCID 或 fingerprint 直接显示在终端。
+如果被监控资源不在当前实例的 Compartment，在提示时输入目标 Compartment OCID。已有私密值在重新初始化时只显示“已设置，回车保留”。
 
-脚本会生成本机 `.env`，并输出一条包含当前实例信息的 Cloud Shell 命令。`.env` 已被 Git 忽略，不会进入源码仓库。
+脚本会生成本机 `.env`，并输出一条 OCI Cloud Shell 命令。Metadata 读取失败时会回退到手工输入。
 
-如果 Metadata 读取失败，脚本会回退为手工输入，不会中断部署。先确认 `curl`、`jq` 已安装，并确认命令确实运行在 OCI Compute 实例内。
+## 5. 在 Cloud Shell 创建 IAM
 
-## 2. Cloud Shell 一键创建 IAM
-
-在 OCI Console 顶部打开 Cloud Shell。Cloud Shell 是独立环境，第一次使用时先获取项目脚本：
+打开 OCI Console 顶部的 Cloud Shell。首次使用时先获取同一版本的项目脚本：
 
 ```bash
-git clone https://github.com/your-account/oci-arm-cost-monitor.git
-cd oci-arm-cost-monitor
+git clone <repository-url> oci-arm-monitor
+cd oci-arm-monitor
 ```
 
-将第 1 步初始化脚本输出的命令粘贴到 Cloud Shell。格式如下，文档中的值仅为占位符：
+粘贴 ARM 实例初始化脚本输出的命令。格式如下，所有值均为占位符：
 
 ```bash
 bash scripts/oci-cloud-shell-setup.sh \
@@ -95,45 +138,47 @@ bash scripts/oci-cloud-shell-setup.sh \
   --resource-compartment-id 'ocid1.compartment.oc1..replace-with-your-compartment-ocid'
 ```
 
-如果被监控实例直接位于根 Compartment，OCI Metadata 返回的 Compartment ID 会与 Tenancy OCID 相同。此时 `--resource-compartment-id` 直接填写与 `--tenancy-id` 相同的值，脚本会自动把实例、网络和指标权限生成成 `in tenancy`。
-
 脚本会创建或更新：
 
 - Dynamic Group：`oci-arm-monitor-instances`。
 - IAM Policy：`oci-arm-monitor-readonly`。
 - Compute、VNIC、Monitoring 和 Usage API 的只读权限。
 
-脚本可重复执行。同名资源已经存在时会同步 matching rule 和 policy statements，不会重复创建。
+如果被监控资源位于根 Compartment，`--resource-compartment-id` 直接填写与 `--tenancy-id` 相同的 Tenancy OCID。脚本会自动生成 `in tenancy` 策略，不会错误地把 Tenancy OCID 当作普通 Compartment OCID。
 
-只想预览、不调用 OCI API 时，在命令末尾加：
+只预览命令而不调用 OCI API：
 
 ```bash
---dry-run
+bash scripts/oci-cloud-shell-setup.sh \
+  --tenancy-id 'ocid1.tenancy.oc1..replace-with-your-tenancy-ocid' \
+  --instance-id 'ocid1.instance.oc1.region.replace-with-your-instance-ocid' \
+  --resource-compartment-id 'ocid1.compartment.oc1..replace-with-your-compartment-ocid' \
+  --dry-run
 ```
 
-Cloud Shell 当前用户必须具备管理 Dynamic Group 和 Policy 的权限。如果没有权限，请让 tenancy 管理员运行这条命令。IAM Policy 通常需要几分钟生效。
+Cloud Shell 当前用户必须有管理 Dynamic Group 和 Policy 的权限。IAM Policy 可能需要几分钟生效。
 
-## 3. ARM 实例启动后端
+## 6. 启动完整应用
 
 回到 ARM 实例项目目录：
 
 ```bash
 docker compose config --quiet
-docker compose up -d --build oci-arm-monitor-server
+docker compose up -d --build
 docker compose ps
-docker compose logs -f oci-arm-monitor-server
 ```
 
-如果只允许本机 Nginx 反代访问，建议将 `docker-compose.yml` 端口限制为：
+查看日志：
 
-```yaml
-ports:
-  - "127.0.0.1:9090:9090"
+```bash
+docker compose logs -f
 ```
 
-首次构建前端和配置 Nginx，继续执行 [完整部署手册](fresh-deploy-docker-compose.md)的“构建前端”和“配置 Nginx”章节。
+`oci-arm-monitor-web` 提供前端并转发 `/api/*`，`oci-arm-monitor-server` 只在 Docker 网络内监听 `9090`。宿主机不需要配置 Nginx。
 
-## 4. 登录后运行连接诊断
+## 7. 登录、诊断和同步
+
+打开初始化脚本打印的地址，使用初始化时设置的管理员账号和密码登录。
 
 进入：
 
@@ -141,40 +186,62 @@ ports:
 系统设置 -> OCI 配置 -> 运行 OCI 连接诊断
 ```
 
-诊断会依次读取少量真实数据，检查：
+诊断依次检查：
 
-- 后端 `.env` 基础配置。
+- 后端 OCI 基础配置。
 - Instance Principal Provider。
 - Compute 实例读取权限。
 - VNIC 网络读取权限。
 - Monitoring 指标读取权限。
 - Usage API 费用读取权限。
 
-诊断不会写入数据库。全部通过后再点击“同步 OCI 数据”。
+诊断不会写数据库。全部通过后点击“同步 OCI 数据”，并在“同步中心”查看进度。
 
-## 5. 非 OCI 服务器
+## 8. 常见问题
 
-如果后端不在 Oracle Cloud 实例上，无法使用 Instance Principal。改用 API Key 模式：
-
-```env
-OCI_AUTH_MODE=config_file
-OCI_CONFIG_PROFILE=DEFAULT
-OCI_CONFIG_DIR=./deploy/oci
-```
-
-然后按 [OCI 接入说明](oci-setup.md)配置 `deploy/oci/config` 和 `oci_api_key.pem`。
-
-## 6. 发布前检查
-
-项目开源前运行：
+### 页面无法访问
 
 ```bash
-bash scripts/check-public-release.sh
+docker compose ps
+docker compose logs --tail=200 oci-arm-monitor-web
 ```
 
-该检查扫描 Git 已跟踪文件和未跟踪但未被忽略的发布候选文件，不读取已忽略的 `.env`、私钥或本地数据库。完整流程见 [开源发布检查清单](open-source-release.md)。
+HTTP 模式检查所选端口；HTTPS 模式检查 DNS、TCP `80/443`、系统时间和端口占用。
 
-## 7. Oracle 官方参考
+### 页面返回 502
+
+```bash
+docker compose logs --tail=200 oci-arm-monitor-server
+docker compose ps
+```
+
+Web 容器会等待后端健康检查通过。后端启动失败时重点检查 `.env` 必填项和 OCI 配置。
+
+### OCI 诊断返回 403
+
+确认 Dynamic Group matching rule 使用当前监控实例 OCID，并确认 Policy 创建在正确的 Tenancy。新 Policy 生效可能有短暂延迟。
+
+### 非 OCI 服务器
+
+非 OCI Compute 实例不能使用 Instance Principal。重新运行初始化脚本并选择：
+
+```text
+config_file
+```
+
+然后按 [OCI 接入说明](oci-setup.md) 准备 API Key、`deploy/oci/config` 和私钥。
+
+## 9. 更新与运维
+
+```bash
+git pull --ff-only
+docker compose up -d --build
+docker compose ps
+```
+
+SQLite、Caddy 状态和 HTTPS 证书保存在 Docker volume 中，重建容器不会删除这些数据。备份方式见 [Docker 容器与数据说明](docker-backend.md)。
+
+## 10. Oracle 官方参考
 
 - [Calling Services from an Instance](https://docs.oracle.com/en-us/iaas/Content/Identity/Tasks/callingservicesfrominstances.htm)
 - [Managing Dynamic Groups](https://docs.oracle.com/en-us/iaas/Content/Identity/Tasks/managingdynamicgroups.htm)

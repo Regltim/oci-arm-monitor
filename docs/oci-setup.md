@@ -1,241 +1,265 @@
-# OCI 真实数据接入说明
+# OCI 接入说明
 
-这份说明用于把面板接到真实 OCI 数据。当前实现不依赖付费数据库、Logging、Alarm、Notifications 或 Cost Reports 对象存储 CSV；后端直接通过 OCI Java SDK 拉取 Compute、VNIC、Monitoring 和 Usage API，并落到本机 SQLite。
+OCI ARM Monitor 支持两种认证方式：
 
-如果后端部署在 Oracle Cloud 实例本机，优先使用快速版：[quick-deploy.md](quick-deploy.md)。快速版使用 Instance Principal，不需要 API Key 和服务器私钥。
+| 模式 | 适用环境 | 服务器是否保存 OCI 私钥 |
+| --- | --- | --- |
+| `instance_principal` | 应用运行在 OCI Compute 实例 | 否 |
+| `config_file` | 应用运行在其他云或本地服务器 | 是 |
 
-如果你需要把后端部署在非 Oracle 服务器上，再按本文的 API Key / OCI config 模式配置。对 Oracle 控制台、用户组、Policy 不熟时，建议先看通俗版操作流程：[oracle-console-simple-guide.md](oracle-console-simple-guide.md)。
+应用部署在 OCI Compute 实例时优先使用 Instance Principal。API Key 只用于无法使用实例身份的环境。
 
-官方参考：
+## 1. 必要权限
 
-- [OCI API Signing Keys](https://docs.oracle.com/en-us/iaas/Content/API/Concepts/apisigningkey.htm)
-- [Calling Services from an Instance](https://docs.oracle.com/en-us/iaas/Content/Identity/Tasks/callingservicesfrominstances.htm)
-- [SDK and CLI Configuration File](https://docs.oracle.com/en-us/iaas/Content/API/Concepts/sdkconfig.htm)
-- [Compute Instance Monitoring Plugin](https://docs.oracle.com/en-us/iaas/Content/Compute/Tasks/enablingmonitoring.htm)
-- [Common IAM Policies](https://docs.oracle.com/iaas/Content/Identity/Concepts/commonpolicies.htm)
-- [OCI Price List](https://www.oracle.com/cloud/price-list/)
+系统需要以下只读权限：
 
-## 1. 创建 OCI API Key
-
-在运行后端的服务器上执行：
-
-```bash
-mkdir -p ~/.oci
-openssl genrsa -out ~/.oci/oci_api_key.pem 2048
-chmod 600 ~/.oci/oci_api_key.pem
-openssl rsa -pubout -in ~/.oci/oci_api_key.pem -out ~/.oci/oci_api_key_public.pem
+```text
+instance-family           Compute 实例
+virtual-network-family    VNIC、公网 IP 和私网 IP
+metrics                   CPU、内存和流量指标
+usage-report              费用和用量
 ```
 
-登录 OCI Console：
+针对普通 Compartment：
 
-1. 进入用户详情页。
-2. 打开 API Keys。
-3. 上传 `~/.oci/oci_api_key_public.pem` 的内容。
-4. 记录 fingerprint。
+```text
+Allow <principal> to read instance-family in compartment id <compartment-ocid>
+Allow <principal> to read virtual-network-family in compartment id <compartment-ocid>
+Allow <principal> to read metrics in compartment id <compartment-ocid>
+Allow <principal> to read usage-report in tenancy
+```
 
-## 2. 创建 `~/.oci/config`
+针对根 Compartment：
 
-在服务器上创建：
+```text
+Allow <principal> to read instance-family in tenancy
+Allow <principal> to read virtual-network-family in tenancy
+Allow <principal> to read metrics in tenancy
+Allow <principal> to read usage-report in tenancy
+```
+
+`<principal>` 在 Instance Principal 模式下是 `dynamic-group <name>`，在 API Key 模式下是 `group <name>`。
+
+费用权限必须使用 tenancy 范围。新 Policy 可能需要几分钟生效。
+
+## 2. Instance Principal
+
+### 2.1 初始化服务器
+
+在 OCI Compute 实例的项目目录运行：
+
+```bash
+bash scripts/init-deploy.sh
+```
+
+认证模式选择：
+
+```text
+instance_principal
+```
+
+脚本会从 Instance Metadata 读取当前 Instance OCID、Tenancy OCID、Compartment OCID 和 Region，并输出 Cloud Shell 命令。
+
+### 2.2 创建 Dynamic Group 和 Policy
+
+在 OCI Console Cloud Shell 获取项目脚本，然后粘贴初始化脚本输出的命令：
+
+```bash
+bash scripts/oci-cloud-shell-setup.sh \
+  --tenancy-id 'ocid1.tenancy.oc1..replace-with-your-tenancy-ocid' \
+  --instance-id 'ocid1.instance.oc1.region.replace-with-your-instance-ocid' \
+  --resource-compartment-id 'ocid1.compartment.oc1..replace-with-your-compartment-ocid'
+```
+
+脚本默认创建：
+
+```text
+Dynamic Group: oci-arm-monitor-instances
+Policy:        oci-arm-monitor-readonly
+```
+
+Matching rule 只匹配当前监控服务器实例：
+
+```text
+instance.id = '<monitor-instance-ocid>'
+```
+
+如果目标资源位于根 Compartment，`--resource-compartment-id` 传入 Tenancy OCID。脚本会生成 `in tenancy`，不会把 Tenancy OCID 当作普通 Compartment OCID。
+
+完整步骤见 [Oracle ARM 两步快速部署](quick-deploy.md)。
+
+## 3. API Key / config_file
+
+### 3.1 创建专用用户和用户组
+
+推荐创建专用 API 用户，并加入只读用户组，例如：
+
+```text
+User:  oci-monitor-api-user
+Group: oci-monitor-readers
+```
+
+不要直接给 API 用户管理员权限。
+
+### 3.2 创建密钥
+
+在部署服务器执行：
+
+```bash
+mkdir -p deploy/oci
+cd deploy/oci
+openssl genrsa -out oci_api_key.pem 2048
+openssl rsa -pubout -in oci_api_key.pem -out oci_api_key_public.pem
+```
+
+在 OCI Console 打开 API 用户详情：
+
+```text
+API Keys -> Add API key -> Paste public key
+```
+
+粘贴 `oci_api_key_public.pem`，并记录 OCI 返回的 fingerprint。
+
+### 3.3 创建 OCI config
+
+创建 `deploy/oci/config`：
 
 ```ini
 [DEFAULT]
-user=ocid1.user.oc1..替换为用户OCID
-fingerprint=替换为fingerprint
-tenancy=ocid1.tenancy.oc1..替换为租户OCID
+user=ocid1.user.oc1..replace-with-your-user-ocid
+fingerprint=replace-with-your-api-key-fingerprint
+tenancy=ocid1.tenancy.oc1..replace-with-your-tenancy-ocid
 region=ap-seoul-1
 key_file=/home/monitor/.oci/oci_api_key.pem
 ```
 
-权限：
+`key_file` 必须使用容器内路径 `/home/monitor/.oci/oci_api_key.pem`。
+
+设置权限：
 
 ```bash
-chmod 600 ~/.oci/config
-chmod 600 ~/.oci/oci_api_key.pem
-```
-
-如果后端以 `monitor` 用户运行，路径应是 `/home/monitor/.oci/config`，不要使用 root 用户的 config。
-
-## 3. 配置 IAM 只读策略
-
-更通俗的逐步操作说明见 [oracle-console-simple-guide.md](oracle-console-simple-guide.md)。
-
-创建一个用户组，例如 `oci-monitor-readers`，把 API Key 所属用户加入该组。
-
-在 tenancy 或目标 compartment 上配置策略。下面是当前功能需要的只读起点：
-
-```text
-Allow group oci-monitor-readers to read instance-family in compartment <compartment-name>
-Allow group oci-monitor-readers to read virtual-network-family in compartment <compartment-name>
-Allow group oci-monitor-readers to read metrics in compartment <compartment-name>
-Allow group oci-monitor-readers to read usage-report in tenancy
-```
-
-如果你的实例、VNIC 或指标跨多个 compartment，改成 tenancy 范围或分别给多个 compartment 授权。
-
-Usage API 读取成本需要 tenancy 范围的 `read usage-report in tenancy`。如果同步成本时返回 403，优先检查该策略和用户组是否在正确身份域下生效。
-
-## 4. 启用 Compute Instance Monitoring Plugin
-
-每台需要采集 CPU、内存和实例级指标的 Compute 实例都要确认 Oracle Cloud Agent 里的 Compute Instance Monitoring plugin 已启用。
-
-路径通常是：
-
-```text
-Compute -> Instances -> 选择实例 -> Oracle Cloud Agent -> Compute Instance Monitoring
-```
-
-注意：
-
-- 插件本身不是本项目创建的付费资源。
-- Monitoring 服务按 ingestion/retrieval 数据点计量。
-- Oracle 当前价格表显示 Monitoring ingestion 前 500 million datapoints、retrieval 前 1 billion datapoints 为 Free；超过后可能收费。
-- 本项目只做手动同步，并把结果落本地 SQLite，避免页面频繁请求 Monitoring API。
-
-## 5. 用 Docker 启动后端
-
-后端推荐用 Docker 跑服务，详细说明见 [docker-backend.md](docker-backend.md)。
-
-准备环境变量：
-
-```bash
-cp .env.example .env
-```
-
-准备 OCI config 目录：
-
-```bash
-mkdir -p deploy/oci
-cp ~/.oci/config deploy/oci/config
-cp ~/.oci/oci_api_key.pem deploy/oci/oci_api_key.pem
-```
-
-注意把 `deploy/oci/config` 里的 `key_file` 改成容器内路径：
-
-```ini
-key_file=/home/monitor/.oci/oci_api_key.pem
-```
-
-容器默认使用 UID/GID `10001` 读取 OCI config：
-
-```bash
+cd <project-directory>
 sudo chown -R 10001:10001 deploy/oci
 sudo chmod 700 deploy/oci
 sudo chmod 600 deploy/oci/config deploy/oci/oci_api_key.pem
 ```
 
-启动：
+### 3.4 创建 IAM Policy
 
-```bash
-docker compose up -d --build oci-arm-monitor-server
-docker compose logs -f oci-arm-monitor-server
+为 `oci-monitor-readers` 创建只读策略：
+
+```text
+Allow group oci-monitor-readers to read instance-family in compartment id <compartment-ocid>
+Allow group oci-monitor-readers to read virtual-network-family in compartment id <compartment-ocid>
+Allow group oci-monitor-readers to read metrics in compartment id <compartment-ocid>
+Allow group oci-monitor-readers to read usage-report in tenancy
 ```
 
-首次启动必须设置管理员账号，可在 `.env` 中配置：
+如果目标资源位于根 Compartment，将前三条改为 `in tenancy`。
 
-```bash
-MONITOR_ADMIN_USERNAME=admin
-MONITOR_ADMIN_PASSWORD=替换为强密码
+控制台逐步说明见 [Oracle 控制台通俗配置流程](oracle-console-simple-guide.md)。
+
+## 4. 启用实例监控插件
+
+每台需要采集 CPU、内存和实例级指标的 Compute 实例都要启用 Oracle Cloud Agent 的 `Compute Instance Monitoring` plugin。
+
+控制台路径通常是：
+
+```text
+Compute -> Instances -> 选择实例 -> Oracle Cloud Agent -> Compute Instance Monitoring
 ```
 
-生产环境走 HTTPS 时建议设置：
+确认状态为 Enabled / Running。也可以在实例 Metrics 页面选择 namespace：
 
-```bash
-MONITOR_COOKIE_SECURE=true
+```text
+oci_computeagent
 ```
 
-如果忘记设置管理员账号，后端不会自动创建默认账号。
+如果 Compute 实例能在 OCI Console 显示 CPU、Memory 等图表，说明 Monitoring 正在接收指标。
 
-## 5.1 本地 Maven 启动
+## 5. 生成应用配置
 
-首次启动必须设置管理员账号：
-
-```bash
-cd server
-MONITOR_ADMIN_USERNAME=admin \
-MONITOR_ADMIN_PASSWORD='替换为强密码' \
-OCI_MONITOR_DB=/home/monitor/oci-arm-cost-monitor.db \
-OCI_AUTH_MODE=config_file \
-OCI_CONFIG_FILE_PATH=/home/monitor/.oci/config \
-OCI_CONFIG_PROFILE=DEFAULT \
-OCI_REGION=ap-seoul-1 \
-OCI_COMPARTMENT_OCID='替换为目标CompartmentOCID' \
-mvn spring-boot:run
-```
-
-生产环境走 HTTPS 时建议加：
+运行：
 
 ```bash
-MONITOR_COOKIE_SECURE=true
+bash scripts/init-deploy.sh
 ```
 
-如果忘记设置管理员账号，后端不会自动创建默认账号。
+Instance Principal 选择 `instance_principal`；API Key 选择 `config_file`。脚本会生成 `.env` 并检查 API Key 文件位置和权限。
 
-## 6. 后端配置并同步
+关键配置：
 
-Oracle/OCI 配置不放在前端页面里。请在后端 `.env` 或启动环境变量中配置：
+```env
+OCI_AUTH_MODE=instance_principal
+OCI_REGION=ap-seoul-1
+OCI_COMPARTMENT_OCID=ocid1.compartment.oc1..replace-with-your-compartment-ocid
+OCI_TENANCY_OCID=ocid1.tenancy.oc1..replace-with-your-tenancy-ocid
+```
+
+API Key 模式还需要：
 
 ```env
 OCI_AUTH_MODE=config_file
-OCI_CONFIG_FILE_PATH=/home/monitor/.oci/config
 OCI_CONFIG_PROFILE=DEFAULT
-OCI_REGION=ap-seoul-1
-OCI_COMPARTMENT_OCID=替换为目标CompartmentOCID
-OCI_TENANCY_OCID=
+OCI_CONFIG_DIR=./deploy/oci
 ```
 
-登录面板后进入系统设置，确认 OCI 配置状态为已配置，然后点击同步 OCI 数据。
+`.env`、`deploy/oci/` 和私钥不会进入 Git。
 
-同步结果会写入 `sync_run` 表，并在页面展示：
-
-- 未配置
-- 尚未同步
-- 最近一次同步失败
-- 最近一次同步成功及同步数量
-
-## 7. Nginx 反向代理示例
-
-前端静态文件部署到 `/var/www/oci-arm-cost-monitor`，后端监听 `127.0.0.1:9090`：
-
-```nginx
-server {
-  listen 80;
-  server_name monitor.example.com;
-
-  root /var/www/oci-arm-cost-monitor;
-  index index.html;
-
-  location /api/ {
-    proxy_pass http://127.0.0.1:9090/api/;
-    proxy_set_header Host $host;
-    proxy_set_header X-Real-IP $remote_addr;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto $scheme;
-  }
-
-  location / {
-    try_files $uri $uri/ /index.html;
-  }
-}
-```
-
-公网部署建议配 HTTPS，并设置 `MONITOR_COOKIE_SECURE=true`。
-
-## 8. 旧本地库处理
-
-早期开发阶段如果生成过本地样例数据，当前后端启动会清理固定 ID 为 `demo-arm-a1-01` 的旧记录。
-
-如果你希望从零开始：
+## 6. 启动和诊断
 
 ```bash
-cd server
-mv oci-arm-cost-monitor.db oci-arm-cost-monitor.db.bak
+docker compose config --quiet
+docker compose up -d --build
+docker compose ps
 ```
 
-然后重新启动后端。
+登录面板后进入：
 
-## 9. 已知边界
+```text
+系统设置 -> OCI 配置 -> 运行 OCI 连接诊断
+```
 
-- 费用当前来自 Usage API，不读取对象存储里的 Cost Reports CSV。
-- Boot Volume 容量当前字段已预留，但同步阶段还没有补充 Block Volume API。
-- Monitoring 指标维度依赖 OCI 返回的 `resourceId`，如果你的区域或实例指标维度不同，需要根据同步失败信息调整查询。
-- 没有真实 OCI config、后端环境变量和 IAM 权限时，只能验证登录、配置状态、空态和本地手工费用，不能证明云端数据一定能同步成功。
+诊断依次验证 Provider、Compute、VNIC、Monitoring 和 Usage API。诊断不写数据库，通过后再执行同步。
+
+## 7. 常见错误
+
+### 401 / NotAuthenticated
+
+API Key 模式检查：
+
+- `user` 是否为 API 用户 OCID。
+- fingerprint 是否与控制台一致。
+- 私钥是否与已上传的公钥配对。
+- `key_file` 是否为容器内路径。
+- 容器用户是否可读取文件。
+
+### 403 / NotAuthorized
+
+检查：
+
+- Dynamic Group matching rule 或 API 用户组成员关系。
+- Policy 的 principal 名称。
+- Policy 所在 Tenancy 和目标 Compartment scope。
+- `read usage-report in tenancy` 是否存在。
+
+### 实例为空
+
+检查 `.env` 中的 Region 和 Compartment OCID。根 Compartment 应使用 Tenancy OCID，并配套 `in tenancy` Policy。
+
+### CPU、内存或流量为空
+
+检查目标实例的 Compute Instance Monitoring plugin，以及 `read metrics` 权限。
+
+### 成本为空
+
+Usage API 数据可能有延迟，当前月份也可能没有可归集费用。先确认 `read usage-report in tenancy` 诊断通过。
+
+## 8. 官方参考
+
+- [Calling Services from an Instance](https://docs.oracle.com/en-us/iaas/Content/Identity/Tasks/callingservicesfrominstances.htm)
+- [API signing key](https://docs.oracle.com/en-us/iaas/Content/API/Concepts/apisigningkey.htm)
+- [SDK and CLI Configuration File](https://docs.oracle.com/iaas/Content/API/Concepts/sdkconfig.htm)
+- [IAM policy syntax](https://docs.oracle.com/en-us/iaas/Content/Identity/Concepts/policysyntax.htm)
+- [Common Policies](https://docs.oracle.com/iaas/Content/Identity/Concepts/commonpolicies.htm)
+- [Enabling Monitoring for Compute Instances](https://docs.oracle.com/iaas/Content/Compute/Tasks/enablingmonitoring.htm)

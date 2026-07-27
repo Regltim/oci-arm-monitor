@@ -305,52 +305,53 @@ sudo chmod 700 deploy/oci
 sudo chmod 600 deploy/oci/config deploy/oci/oci_api_key.pem
 ```
 
-## 8. 配置后端 .env
+## 8. 生成应用配置
 
-编辑：
+进入项目目录并运行初始化脚本：
 
 ```bash
-nano /opt/oci-arm-cost-monitor/.env
+cd /opt/oci-arm-monitor
+bash scripts/init-deploy.sh
 ```
 
-至少要有：
+访问模式选择 HTTP 或 HTTPS，OCI 认证模式选择：
 
-```env
-MONITOR_ADMIN_USERNAME=admin
-MONITOR_ADMIN_PASSWORD=替换为强密码
-MONITOR_COOKIE_SECURE=true
+```text
+config_file
+```
 
-OCI_AUTH_MODE=config_file
+脚本会收集管理员账号、Region、目标 Compartment、OCI config profile 和目录，并生成 `.env`。API Key 模式默认使用：
+
+```text
 OCI_CONFIG_PROFILE=DEFAULT
-OCI_REGION=ap-seoul-1
-OCI_COMPARTMENT_OCID=ocid1.compartment.oc1..你的CompartmentOCID
-OCI_TENANCY_OCID=
 OCI_CONFIG_DIR=./deploy/oci
 ```
 
-`OCI_TENANCY_OCID` 可以先留空，因为 config 文件里已经有 `tenancy=...`。
+初始化结束前，脚本会检查 `deploy/oci/config`、私钥路径和文件权限。
 
 ## 9. 启动并验证
 
-启动后端：
+启动完整应用：
 
 ```bash
 cd /opt/oci-arm-cost-monitor
-docker compose up -d --build oci-arm-monitor-server
-docker compose logs -f oci-arm-monitor-server
+docker compose config --quiet
+docker compose up -d --build
+docker compose ps
 ```
 
-登录面板：
+打开初始化脚本打印的访问地址。查看日志：
 
-```text
-https://你的域名
+```bash
+docker compose logs -f
 ```
 
 进入系统设置：
 
-1. 看 OCI 配置状态是否为已配置。
-2. 点击同步 OCI 数据。
-3. 回到总览、实例、流量、成本页面看真实数据。
+1. 确认 OCI 配置状态为已配置。
+2. 运行 OCI 连接诊断。
+3. 诊断通过后点击同步 OCI 数据。
+4. 回到总览、实例、流量、成本页面查看真实数据。
 
 ## 10. 常见报错怎么判断
 
