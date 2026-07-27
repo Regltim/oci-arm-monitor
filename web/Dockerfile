@@ -18,4 +18,4 @@ FROM caddy:2-alpine
 COPY Caddyfile /etc/caddy/Caddyfile
 COPY --from=builder /workspace/dist /srv
 
-EXPOSE 80 443 8080
+EXPOSE 8080

@@ -1,4 +1,8 @@
-{$MONITOR_SITE_ADDRESS::8080} {
+{
+  auto_https off
+}
+
+:8080 {
   encode zstd gzip
 
   handle /api/* {

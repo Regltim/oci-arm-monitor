@@ -1,185 +1,119 @@
 # 全新服务器部署手册
 
-本手册适合在一台全新的 Linux 服务器上部署 OCI ARM Monitor。默认方案通过 Docker Compose 同时运行前端和后端，不需要在宿主机安装 Nginx、Node.js、pnpm、Java 或 Certbot。
+本文说明如何用 Docker Compose 同时运行 OCI ARM Monitor 的前端和后端，并接入服务器已有的 Nginx、OpenResty 或 1Panel。
 
-如果应用直接部署在 Oracle Cloud Compute 实例上，推荐先看更短的 [Oracle ARM 两步快速部署](quick-deploy.md)。
-
-## 1. 架构
+## 1. 架构和边界
 
 ```text
-浏览器
-  |
-  | HTTP :8080 或 HTTPS :443
-  v
-oci-arm-monitor-web
-  |-- Caddy
-  |-- Umi 静态页面
-  |-- /api/* 反向代理
-  |
-  | Docker 内网 :9090
-  v
-oci-arm-monitor-server
-  |-- Spring Boot
-  |-- SQLite
-  |-- OCI SDK
+公网域名 :80/:443
+       |
+Nginx / OpenResty / 1Panel
+       |
+http://127.0.0.1:28461
+       |
+oci-arm-monitor-web :8080
+       |
+Docker 内网
+       |
+oci-arm-monitor-server :9090
 ```
 
-默认安全边界：
-
-- HTTP 和 HTTPS 入口互斥，不会同时开放。
+- 容器不管理域名、TLS 或证书。
+- Web 端口默认只绑定宿主机 `127.0.0.1:28461`。
+- Web 容器提供前端页面，并把 `/api/*` 转发到后端。
 - 后端 `9090` 不发布到宿主机。
-- SQLite、Caddy 状态和 HTTPS 证书使用 Docker volume 持久化。
-- OCI 私密配置仅保存在服务器 `.env` 和 `deploy/oci/`。
+- SQLite 数据保存在 Docker 命名卷。
 
 ## 2. 服务器要求
 
-- Linux，支持 `linux/arm64` 或 `linux/amd64` 容器。
-- Docker Engine 和 Docker Compose plugin。
-- `curl`、`jq` 和 `git`。
-- 至少 2 GB 可用内存用于首次镜像构建。
+- Linux ARM64 或 AMD64
+- Docker Engine
+- Docker Compose v2
+- `git`、`curl`、`jq`
+- 已有 Nginx、OpenResty 或 1Panel 站点管理能力
 
-Ubuntu / Debian 安装基础工具：
-
-```bash
-sudo apt update
-sudo apt install -y ca-certificates curl jq git
-```
-
-Oracle Linux 安装基础工具：
-
-```bash
-sudo dnf install -y ca-certificates curl jq git
-```
-
-Docker 请按 [Docker Engine 官方安装文档](https://docs.docker.com/engine/install/) 安装。完成后确认：
+确认环境：
 
 ```bash
 docker --version
 docker compose version
+git --version
+curl --version
+jq --version
 ```
 
-如果当前用户通过 Docker 用户组运行容器，加入用户组后需要重新登录：
+如果应用部署在 OCI Compute 实例上，推荐使用 Instance Principal。其他服务器可使用 OCI API Key。
 
-```bash
-sudo usermod -aG docker "$USER"
-```
-
-## 3. 获取项目
+## 3. 获取代码
 
 ```bash
 sudo mkdir -p /opt/oci-arm-monitor
-sudo chown -R "$USER":"$USER" /opt/oci-arm-monitor
-git clone <repository-url> /opt/oci-arm-monitor
+sudo chown "$(id -u):$(id -g)" /opt/oci-arm-monitor
+git clone https://github.com/Regltim/oci-arm-monitor.git /opt/oci-arm-monitor
 cd /opt/oci-arm-monitor
 ```
 
-确认至少存在：
-
-```text
-docker-compose.yml
-docker-compose.http.yml
-docker-compose.https.yml
-server/Dockerfile
-web/Dockerfile
-scripts/init-deploy.sh
-```
-
-## 4. 选择访问模式
-
-### HTTP 模式
-
-适合首次验证、内网或已有上层访问控制的环境。
-
-- 访问地址：`http://<server-ip>:<port>`。
-- 默认端口：TCP `8080`。
-- 可以在初始化时修改端口。
-- 不需要域名和证书。
-
-### HTTPS 模式
-
-适合公网长期运行。
-
-- 访问地址：`https://monitor.example.com`。
-- 域名 A/AAAA 记录必须指向服务器。
-- OCI Security List / NSG 和系统防火墙必须放行 TCP `80/443`。
-- TCP `80/443` 不能被其他服务占用。
-- Caddy 自动申请和续期证书。
-
-项目不会自动修改 DNS、OCI 网络规则或操作系统防火墙。
-
-## 5. 初始化配置
-
-在项目根目录运行：
+## 4. 初始化配置
 
 ```bash
 bash scripts/init-deploy.sh
 ```
 
-脚本会依次收集：
+脚本会收集：
 
-1. HTTP 或 HTTPS 访问模式。
-2. 管理员账号和密码。
-3. OCI 认证模式。
-4. Region、Tenancy 和目标 Compartment。
-5. OCI config 路径和运行参数。
+1. 用户最终访问的完整 Origin，例如 `https://monitor.example.com`。
+2. 宿主机 Web 端口，默认 `28461`。
+3. 管理员账号和密码。
+4. OCI 认证模式、Region、Tenancy 和目标 Compartment。
+5. API Key 模式所需的 OCI config 路径。
 
-生成的 `.env` 包含匹配当前访问模式的 Compose 文件、Origin 和 Cookie 设置。重新运行脚本会备份旧 `.env`，已有私密值在提示中显示为“已设置，回车保留”。
+公开 Origin 只能包含协议、主机名和可选端口，不能带路径、查询参数或末尾斜杠。它用于生成 CORS 和 Cookie 配置，不负责容器 TLS。
 
-### 5.1 Instance Principal
+脚本生成的关键配置：
 
-应用运行在 OCI Compute 实例时选择：
+```env
+COMPOSE_FILE=docker-compose.yml
+MONITOR_PUBLIC_URL=https://monitor.example.com
+MONITOR_WEB_BIND_ADDRESS=127.0.0.1
+MONITOR_WEB_PORT=28461
+MONITOR_CORS_ALLOWED_ORIGINS=https://monitor.example.com
+MONITOR_COOKIE_SECURE=true
+```
+
+重新运行脚本会备份旧 `.env`。已有域名、OCID 和密码不会在提示中明文回显。
+
+## 5. OCI 认证
+
+### Instance Principal
+
+在 OCI Compute 实例上选择：
 
 ```text
 instance_principal
 ```
 
-脚本会尝试从 Instance Metadata 自动读取当前 Instance、Tenancy、Compartment 和 Region，并输出一条 Cloud Shell IAM 配置命令。按 [Oracle ARM 两步快速部署](quick-deploy.md) 完成 Dynamic Group 和 Policy。
+脚本会读取 Instance Metadata，并输出 OCI Cloud Shell 命令。按输出执行 `scripts/oci-cloud-shell-setup.sh`，创建只匹配当前实例的 Dynamic Group 和只读 Policy。
 
-### 5.2 API Key / config_file
+详细步骤见 [Oracle ARM 两步快速部署](quick-deploy.md)。
 
-应用不在 OCI Compute 实例时选择：
+### API Key
+
+在非 OCI 服务器选择：
 
 ```text
 config_file
 ```
 
-准备目录：
-
-```bash
-mkdir -p deploy/oci
-```
-
-容器内 OCI config 必须使用这个私钥路径：
-
-```ini
-[DEFAULT]
-user=ocid1.user.oc1..replace-with-your-user-ocid
-fingerprint=replace-with-your-api-key-fingerprint
-tenancy=ocid1.tenancy.oc1..replace-with-your-tenancy-ocid
-region=ap-seoul-1
-key_file=/home/monitor/.oci/oci_api_key.pem
-```
-
-文件位置：
+然后准备：
 
 ```text
 deploy/oci/config
 deploy/oci/oci_api_key.pem
 ```
 
-设置权限：
+详细步骤见 [OCI 接入说明](oci-setup.md)。
 
-```bash
-sudo chown -R 10001:10001 deploy/oci
-sudo chmod 700 deploy/oci
-sudo chmod 600 deploy/oci/config deploy/oci/oci_api_key.pem
-```
-
-完整 API Key 与 IAM 设置见 [OCI 接入说明](oci-setup.md)。
-
-## 6. 启动
-
-验证配置并启动完整应用：
+## 6. 启动容器
 
 ```bash
 docker compose config --quiet
@@ -187,210 +121,135 @@ docker compose up -d --build
 docker compose ps
 ```
 
-首次构建会下载基础镜像和前后端依赖，所需时间取决于网络速度。
+预期：
 
-查看全部日志：
+- `oci-arm-monitor-server` 状态为 healthy。
+- `oci-arm-monitor-web` 状态为 running。
+- Web 端口显示为 `127.0.0.1:28461->8080/tcp`。
+- 后端没有宿主机端口映射。
+
+先在服务器本机验证：
 
 ```bash
-docker compose logs -f
+curl -I http://127.0.0.1:28461/
+curl -sS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:28461/api/auth/me
 ```
 
-分别查看：
+首页应返回成功响应；未登录访问 `/api/auth/me` 返回 `401` 属于正常行为。
 
-```bash
-docker compose logs --tail=200 oci-arm-monitor-web
-docker compose logs --tail=200 oci-arm-monitor-server
-```
+## 7. 配置 Nginx / OpenResty
 
-初始化脚本最后会打印访问地址。打开该地址并使用初始化时设置的管理员账号和密码登录。
-
-## 7. 首次诊断与同步
-
-登录后进入：
+为 `monitor.example.com` 创建站点并配置证书，然后把整个站点代理到：
 
 ```text
-系统设置 -> OCI 配置 -> 运行 OCI 连接诊断
+http://127.0.0.1:28461
 ```
 
-诊断会读取少量数据验证 OCI Provider、Compute、VNIC、Monitoring 和 Usage API 权限，不会写入数据库。
+Nginx / OpenResty 示例：
 
-诊断通过后点击“同步 OCI 数据”。同步中心会展示当前步骤、结果和历史记录。
-
-## 8. 验证部署
-
-HTTP 示例：
-
-```bash
-curl -I http://127.0.0.1:8080/
-curl -sS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8080/api/auth/me
+```nginx
+location / {
+    proxy_pass http://127.0.0.1:28461;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
 ```
 
-HTTPS 示例：
+不要再单独代理 `/api/` 到 `9090`。Web 容器已经处理前端路由和 API 转发。
+
+### 1Panel
+
+创建网站并启用 HTTPS 后，添加反向代理：
+
+```text
+代理地址：http://127.0.0.1:28461
+发送域名：$host
+```
+
+### 网络规则
+
+- 公网只按现有站点需要放行 `80/443`。
+- 不要在 OCI Security List、NSG 或系统防火墙中放行 `28461`。
+- `28461` 只供本机 Nginx/OpenResty 使用。
+
+## 8. 验证域名
 
 ```bash
 curl -I https://monitor.example.com/
 curl -sS -o /dev/null -w '%{http_code}\n' https://monitor.example.com/api/auth/me
 ```
 
-首页应返回成功响应，未登录访问 `/api/auth/me` 应返回 `401`。如果 HTTP 使用了自定义端口，请替换命令中的 `8080`。
+打开域名后应直接进入 OCI ARM Monitor 登录页。登录后进入“系统设置”，运行 OCI 连接诊断，再执行同步。
 
-确认后端没有发布宿主机端口：
+## 9. 自定义端口
 
-```bash
-docker compose port oci-arm-monitor-server 9090
-```
-
-默认配置下该命令不应返回宿主机端口。
-
-## 9. 切换 HTTP / HTTPS
-
-重新运行初始化脚本并选择另一种模式：
+如果 `28461` 已被占用，重新运行初始化脚本并选择另一个 `1024-65535` 的高位端口：
 
 ```bash
+sudo ss -ltnp 'sport = :28461'
 bash scripts/init-deploy.sh
 docker compose up -d --build
-docker compose ps
 ```
 
-脚本会更新 `.env` 中的 `COMPOSE_FILE`、站点地址、Origin 和 Cookie 设置。切换到 HTTPS 前必须先完成 DNS 和 TCP `80/443` 配置。
+随后同步修改 Nginx/OpenResty 的 `proxy_pass`。不要改成常见服务端口，也不要把绑定地址改为 `0.0.0.0`。
 
 ## 10. 更新
 
 ```bash
 cd /opt/oci-arm-monitor
-git status --short
 git pull --ff-only
+bash scripts/init-deploy.sh
 docker compose up -d --build
 docker compose ps
 ```
 
-镜像重建不会删除命名卷中的 SQLite、Caddy 状态或证书。
+镜像重建不会删除 `oci-arm-monitor-data` 中的 SQLite 数据。
 
-## 11. 数据备份
+## 11. 备份
 
-先获取实际数据卷名称：
+备份前获取数据卷名称：
 
 ```bash
 docker inspect oci-arm-cost-monitor-server \
   --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}'
 ```
 
-为保证 SQLite 文件一致，备份时短暂停止后端：
+完整备份步骤见 [Docker 容器与数据说明](docker-backend.md)。
+
+## 12. 排障
+
+### 容器启动时报端口占用
 
 ```bash
-mkdir -p backups
-docker compose stop oci-arm-monitor-server
+sudo ss -ltnp 'sport = :28461'
 ```
 
-把 `<data-volume-name>` 替换成上一条命令输出：
+选择另一个高位端口并同时更新反向代理。现有 Nginx/OpenResty 占用 `80/443` 是正常的，不需要停止。
+
+### 域名返回 502
+
+先检查本地目标：
 
 ```bash
-docker run --rm \
-  -v <data-volume-name>:/data:ro \
-  -v "$PWD/backups:/backups" \
-  busybox \
-  sh -c 'cp /data/oci-arm-cost-monitor.db /backups/oci-arm-cost-monitor-$(date +%Y%m%d%H%M%S).db'
-```
-
-重新启动：
-
-```bash
-docker compose start oci-arm-monitor-server
-```
-
-## 12. 常见问题
-
-### 12.1 镜像构建失败
-
-```bash
-docker compose build --no-cache oci-arm-monitor-web
-docker compose build --no-cache oci-arm-monitor-server
-```
-
-检查服务器 DNS、磁盘空间、内存以及访问 Docker Hub 和 npm/Maven 仓库的网络。
-
-### 12.2 页面无法访问
-
-```bash
+curl -I http://127.0.0.1:28461/
 docker compose ps
 docker compose logs --tail=200 oci-arm-monitor-web
-```
-
-HTTP 检查所选端口；HTTPS 检查 DNS、TCP `80/443`、系统时间和端口占用。
-
-### 12.3 HTTPS 证书申请失败
-
-```bash
-docker compose logs --tail=300 oci-arm-monitor-web
-```
-
-常见原因是域名尚未解析到服务器、AAAA 记录指向错误地址、`80/443` 未放行或端口被其他 Web 服务占用。
-
-### 12.4 页面返回 502
-
-```bash
-docker compose ps
 docker compose logs --tail=300 oci-arm-monitor-server
 ```
 
-Web 容器通过 Docker 网络访问后端。重点检查管理员配置、OCI 必填变量和后端健康状态。
+本地正常而域名仍为 502 时，检查 Nginx/OpenResty 的代理地址和站点配置。
 
-### 12.5 OCI 同步返回 401 / 403
+### 登录后立即回到登录页
 
-- Instance Principal：检查 Dynamic Group matching rule 和 Policy scope。
-- API Key：检查 user、fingerprint、tenancy、私钥配对和文件权限。
-- 费用同步：确认存在 `read usage-report in tenancy`。
-- 新 IAM Policy 可能需要几分钟生效。
+确认 `MONITOR_PUBLIC_URL` 与浏览器地址的协议、域名和端口完全一致。HTTPS 域名应生成 `MONITOR_COOKIE_SECURE=true`。
 
-### 12.6 CPU、内存或流量为空
-
-在 OCI Console 确认目标实例的 Oracle Cloud Agent 中 `Compute Instance Monitoring` plugin 为 Enabled / Running。
-
-### 12.7 修改 `.env` 密码后仍是旧密码
-
-管理员账号只在 SQLite 中没有管理员用户时初始化。已有数据库不会因为修改 `.env` 自动重置密码。
-
-### 12.8 端口已被占用
-
-HTTP 自定义端口或 HTTPS `80/443` 被占用时，Compose 会启动失败。先查占用服务，再选择其他 HTTP 端口或停止冲突的 Web 服务。
-
-## 13. 高级兼容：已有宿主机 Nginx
-
-默认部署不需要本节。仅当服务器已经有统一 Nginx、面板必须接入既有站点时使用。
-
-创建一个仅本机发布后端端口的覆盖文件：
-
-```yaml
-# docker-compose.backend-local.yml
-services:
-  oci-arm-monitor-server:
-    ports:
-      - "127.0.0.1:9090:9090"
-```
-
-只启动后端：
+### 后端不健康
 
 ```bash
-docker compose \
-  -f docker-compose.yml \
-  -f docker-compose.backend-local.yml \
-  up -d --build oci-arm-monitor-server
+docker compose logs --tail=300 oci-arm-monitor-server
 ```
 
-已有 Nginx 站点必须把 `/api/` 原样代理到 `http://127.0.0.1:9090`，并为前端路由配置 `index.html` fallback：
-
-```nginx
-location /api/ {
-  proxy_pass http://127.0.0.1:9090;
-  proxy_set_header Host $host;
-  proxy_set_header X-Real-IP $remote_addr;
-  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-  proxy_set_header X-Forwarded-Proto $scheme;
-}
-
-location / {
-  try_files $uri $uri/ /index.html;
-}
-```
-
-此模式下需要自行提供 `web/dist` 静态文件和 HTTPS，并确保 `.env` 中的 Origin、Cookie 与外部访问地址一致。新部署优先使用默认 Caddy 容器方案。
+重点检查管理员密码、OCI Region、Compartment OCID 和认证配置。

@@ -113,74 +113,76 @@ test_instance_metadata_is_auto_detected() {
   assert_equals "${output}" "${expected}"
 }
 
-test_http_access_mode_generates_same_origin_settings() {
+test_https_public_origin_generates_secure_proxy_settings() {
   local output
 
   output="$(INIT_DEPLOY_LIB_ONLY=true bash -c '
     source "$1"
-    configure_http_access "203.0.113.10" "8080"
-    printf "%s|%s|%s|%s|%s|%s" \
-      "${COMPOSE_FILE}" "${MONITOR_ACCESS_MODE}" "${MONITOR_SITE_ADDRESS}" \
-      "${MONITOR_CORS_ALLOWED_ORIGINS}" "${MONITOR_COOKIE_SECURE}" "${MONITOR_ACCESS_URL}"
+    configure_public_access "https://monitor.example.com" "28461"
+    printf "%s|%s|%s|%s|%s|%s|%s" \
+      "${COMPOSE_FILE}" "${MONITOR_PUBLIC_URL}" "${MONITOR_WEB_BIND_ADDRESS}" \
+      "${MONITOR_WEB_PORT}" "${MONITOR_CORS_ALLOWED_ORIGINS}" \
+      "${MONITOR_COOKIE_SECURE}" "${MONITOR_ACCESS_URL}"
   ' _ "${ROOT_DIR}/scripts/init-deploy.sh")" || return 1
 
   assert_equals "${output}" \
-    "docker-compose.yml:docker-compose.http.yml|http|:8080|http://203.0.113.10:8080|false|http://203.0.113.10:8080"
+    "docker-compose.yml|https://monitor.example.com|127.0.0.1|28461|https://monitor.example.com|true|https://monitor.example.com"
 }
 
-test_https_access_mode_generates_secure_settings() {
+test_http_public_origin_generates_non_secure_proxy_settings() {
   local output
 
   output="$(INIT_DEPLOY_LIB_ONLY=true bash -c '
     source "$1"
-    configure_https_access "monitor.example.com"
-    printf "%s|%s|%s|%s|%s|%s" \
-      "${COMPOSE_FILE}" "${MONITOR_ACCESS_MODE}" "${MONITOR_SITE_ADDRESS}" \
-      "${MONITOR_CORS_ALLOWED_ORIGINS}" "${MONITOR_COOKIE_SECURE}" "${MONITOR_ACCESS_URL}"
+    configure_public_access "http://monitor.example.com:8088" "28461"
+    printf "%s|%s|%s|%s" \
+      "${MONITOR_PUBLIC_URL}" "${MONITOR_WEB_PORT}" \
+      "${MONITOR_CORS_ALLOWED_ORIGINS}" "${MONITOR_COOKIE_SECURE}"
   ' _ "${ROOT_DIR}/scripts/init-deploy.sh")" || return 1
 
   assert_equals "${output}" \
-    "docker-compose.yml:docker-compose.https.yml|https|monitor.example.com|https://monitor.example.com|true|https://monitor.example.com"
+    "http://monitor.example.com:8088|28461|http://monitor.example.com:8088|false"
 }
 
-test_access_mode_validation_rejects_invalid_values() {
+test_public_origin_and_web_port_validation_rejects_invalid_values() {
   INIT_DEPLOY_LIB_ONLY=true bash -c '
     source "$1"
-    validate_http_host "203.0.113.10"
-    validate_http_host "monitor.example.com"
-    validate_http_port "1"
-    validate_http_port "65535"
-    validate_https_domain "monitor.example.com"
-    ! validate_http_host "999.1.1.1"
-    ! validate_http_host "https://monitor.example.com"
-    ! validate_http_host "bad-.example.com"
-    ! validate_http_port "0"
-    ! validate_http_port "65536"
-    ! validate_https_domain "https://monitor.example.com"
-    ! validate_https_domain "monitor.example.com:443"
-    ! validate_https_domain "monitor.example.com/path"
+    validate_public_origin "https://monitor.example.com"
+    validate_public_origin "http://203.0.113.10:8088"
+    validate_web_port "1024"
+    validate_web_port "65535"
+    ! validate_public_origin "monitor.example.com"
+    ! validate_public_origin "https://monitor.example.com/"
+    ! validate_public_origin "https://monitor.example.com/path"
+    ! validate_public_origin "https://monitor.example.com?debug=true"
+    ! validate_public_origin "https://user@localhost"
+    ! validate_public_origin "https://monitor.example.com:0"
+    ! validate_public_origin "https://monitor.example.com:65536"
+    ! validate_public_origin "https://monitor.example.com:not-a-port"
+    ! validate_public_origin "https://999.1.1.1"
+    ! validate_web_port "80"
+    ! validate_web_port "65536"
   ' _ "${ROOT_DIR}/scripts/init-deploy.sh"
 }
 
-test_existing_http_host_is_not_echoed_by_access_prompt() {
+test_existing_public_origin_is_not_echoed_by_access_prompt() {
   local output
-  local private_host="private-monitor.example.net"
+  local private_origin="https://private-monitor.example.net"
   local tmp_dir
 
   tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/oci-access-settings.XXXXXX")"
   mkdir -p "${tmp_dir}/scripts"
   cp "${ROOT_DIR}/scripts/init-deploy.sh" "${tmp_dir}/scripts/init-deploy.sh"
   {
-    printf "MONITOR_ACCESS_MODE='http'\n"
-    printf "MONITOR_HTTP_HOST='%s'\n" "${private_host}"
-    printf "MONITOR_HTTP_PORT='8080'\n"
+    printf "MONITOR_PUBLIC_URL='%s'\n" "${private_origin}"
+    printf "MONITOR_WEB_PORT='28461'\n"
   } >"${tmp_dir}/.env"
 
   output="$(
-    printf '\n\n\n' | INIT_DEPLOY_LIB_ONLY=true bash -c '
+    printf '\n\n' | INIT_DEPLOY_LIB_ONLY=true bash -c '
       source "$1"
       collect_access_settings
-      printf "selected=%s" "${MONITOR_HTTP_HOST}"
+      printf "selected=%s|%s" "${MONITOR_PUBLIC_URL}" "${MONITOR_WEB_PORT}"
     ' _ "${tmp_dir}/scripts/init-deploy.sh" 2>&1
   )" || {
     rm -rf "${tmp_dir}"
@@ -189,8 +191,8 @@ test_existing_http_host_is_not_echoed_by_access_prompt() {
 
   rm -rf "${tmp_dir}"
   assert_contains "${output}" "已设置，回车保留" || return 1
-  assert_contains "${output}" "selected=${private_host}" || return 1
-  assert_not_contains "${output%selected=*}" "${private_host}"
+  assert_contains "${output}" "selected=${private_origin}|28461" || return 1
+  assert_not_contains "${output%selected=*}" "${private_origin}"
 }
 
 test_instance_principal_init_uses_safe_defaults() {
@@ -204,7 +206,7 @@ test_instance_principal_init_uses_safe_defaults() {
   cp "${FIXTURE_DIR}/instance-metadata.json" "${tmp_dir}/instance-metadata.json"
 
   output="$(
-    printf '\n203.0.113.10\n\n\nexample-strong-password\n\n\n\n\n' | \
+    printf 'https://monitor.example.com\n\n\nexample-strong-password\n\n\n\n\n' | \
       OCI_INSTANCE_METADATA_URL="file://${tmp_dir}/instance-metadata.json" \
       bash "${tmp_dir}/scripts/init-deploy.sh" 2>&1
   )"
@@ -219,23 +221,43 @@ test_instance_principal_init_uses_safe_defaults() {
     rm -rf "${tmp_dir}"
     return 1
   }
-  assert_contains "$(<"${tmp_dir}/.env")" "COMPOSE_FILE='docker-compose.yml:docker-compose.http.yml'" || {
+  assert_contains "$(<"${tmp_dir}/.env")" "COMPOSE_FILE='docker-compose.yml'" || {
     rm -rf "${tmp_dir}"
     return 1
   }
-  assert_contains "$(<"${tmp_dir}/.env")" "MONITOR_ACCESS_MODE='http'" || {
+  assert_contains "$(<"${tmp_dir}/.env")" "MONITOR_PUBLIC_URL='https://monitor.example.com'" || {
     rm -rf "${tmp_dir}"
     return 1
   }
-  assert_contains "$(<"${tmp_dir}/.env")" "MONITOR_CORS_ALLOWED_ORIGINS='http://203.0.113.10:8080'" || {
+  assert_contains "$(<"${tmp_dir}/.env")" "MONITOR_WEB_BIND_ADDRESS='127.0.0.1'" || {
     rm -rf "${tmp_dir}"
     return 1
   }
-  assert_contains "$(<"${tmp_dir}/.env")" "MONITOR_COOKIE_SECURE='false'" || {
+  assert_contains "$(<"${tmp_dir}/.env")" "MONITOR_WEB_PORT='28461'" || {
     rm -rf "${tmp_dir}"
     return 1
   }
-  assert_contains "${output}" "启动后访问地址：http://203.0.113.10:8080" || {
+  assert_contains "$(<"${tmp_dir}/.env")" "MONITOR_CORS_ALLOWED_ORIGINS='https://monitor.example.com'" || {
+    rm -rf "${tmp_dir}"
+    return 1
+  }
+  assert_contains "$(<"${tmp_dir}/.env")" "MONITOR_COOKIE_SECURE='true'" || {
+    rm -rf "${tmp_dir}"
+    return 1
+  }
+  assert_not_contains "$(<"${tmp_dir}/.env")" "MONITOR_ACCESS_MODE=" || {
+    rm -rf "${tmp_dir}"
+    return 1
+  }
+  assert_not_contains "$(<"${tmp_dir}/.env")" "MONITOR_SITE_ADDRESS=" || {
+    rm -rf "${tmp_dir}"
+    return 1
+  }
+  assert_contains "${output}" "公开访问地址：https://monitor.example.com" || {
+    rm -rf "${tmp_dir}"
+    return 1
+  }
+  assert_contains "${output}" "Nginx/OpenResty 反向代理目标：http://127.0.0.1:28461" || {
     rm -rf "${tmp_dir}"
     return 1
   }
@@ -348,10 +370,10 @@ test_public_release_check_rejects_untracked_sensitive_file() {
 run_test "Cloud Shell IAM dry-run" test_cloud_shell_script_supports_dry_run
 run_test "Cloud Shell 支持根 Compartment" test_cloud_shell_script_supports_root_compartment
 run_test "实例 Metadata 自动识别" test_instance_metadata_is_auto_detected
-run_test "HTTP 访问模式生成同源配置" test_http_access_mode_generates_same_origin_settings
-run_test "HTTPS 访问模式生成安全配置" test_https_access_mode_generates_secure_settings
-run_test "访问模式参数校验" test_access_mode_validation_rejects_invalid_values
-run_test "已有 HTTP 主机不在提示中回显" test_existing_http_host_is_not_echoed_by_access_prompt
+run_test "HTTPS Origin 生成安全反代配置" test_https_public_origin_generates_secure_proxy_settings
+run_test "HTTP Origin 生成非安全反代配置" test_http_public_origin_generates_non_secure_proxy_settings
+run_test "公开 Origin 和 Web 端口参数校验" test_public_origin_and_web_port_validation_rejects_invalid_values
+run_test "已有公开 Origin 不在提示中回显" test_existing_public_origin_is_not_echoed_by_access_prompt
 run_test "Instance Principal 初始化默认值" test_instance_principal_init_uses_safe_defaults
 run_test "初始化脚本支持根 Compartment" test_init_deploy_root_compartment_uses_tenancy_scope
 run_test "已有私有配置不回显" test_existing_private_value_is_not_echoed

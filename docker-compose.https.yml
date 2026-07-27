@@ -1,5 +1,0 @@
-services:
-  oci-arm-monitor-web:
-    ports:
-      - "80:80"
-      - "443:443"

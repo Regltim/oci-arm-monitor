@@ -255,8 +255,8 @@ Allow group oci-monitor-readers to read usage-report in tenancy
 在部署服务器上执行：
 
 ```bash
-mkdir -p /opt/oci-arm-cost-monitor/deploy/oci
-cd /opt/oci-arm-cost-monitor/deploy/oci
+mkdir -p /opt/oci-arm-monitor/deploy/oci
+cd /opt/oci-arm-monitor/deploy/oci
 
 openssl genrsa -out oci_api_key.pem 2048
 openssl rsa -pubout -in oci_api_key.pem -out oci_api_key_public.pem
@@ -277,7 +277,7 @@ API Keys -> Add API key -> Paste public key
 在服务器创建：
 
 ```bash
-nano /opt/oci-arm-cost-monitor/deploy/oci/config
+nano /opt/oci-arm-monitor/deploy/oci/config
 ```
 
 内容类似：
@@ -294,12 +294,12 @@ key_file=/home/monitor/.oci/oci_api_key.pem
 注意：
 
 - `key_file` 必须写容器内路径 `/home/monitor/.oci/oci_api_key.pem`。
-- 不要写宿主机路径 `/opt/oci-arm-cost-monitor/deploy/oci/oci_api_key.pem`。
+- 不要写宿主机路径 `/opt/oci-arm-monitor/deploy/oci/oci_api_key.pem`。
 
 设置权限：
 
 ```bash
-cd /opt/oci-arm-cost-monitor
+cd /opt/oci-arm-monitor
 sudo chown -R 10001:10001 deploy/oci
 sudo chmod 700 deploy/oci
 sudo chmod 600 deploy/oci/config deploy/oci/oci_api_key.pem
@@ -314,7 +314,7 @@ cd /opt/oci-arm-monitor
 bash scripts/init-deploy.sh
 ```
 
-访问模式选择 HTTP 或 HTTPS，OCI 认证模式选择：
+公开访问 Origin 填用户最终访问的完整地址，例如 `https://monitor.example.com`；Web 端口可使用默认的 `28461`。OCI 认证模式选择：
 
 ```text
 config_file
@@ -334,13 +334,13 @@ OCI_CONFIG_DIR=./deploy/oci
 启动完整应用：
 
 ```bash
-cd /opt/oci-arm-cost-monitor
+cd /opt/oci-arm-monitor
 docker compose config --quiet
 docker compose up -d --build
 docker compose ps
 ```
 
-打开初始化脚本打印的访问地址。查看日志：
+先确认服务器本机可以访问初始化脚本打印的反向代理目标，再让现有 Nginx/OpenResty/1Panel 把域名代理到该地址。查看日志：
 
 ```bash
 docker compose logs -f

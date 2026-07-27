@@ -19,7 +19,6 @@ docker run --rm --entrypoint caddy "${IMAGE_NAME}" \
 
 docker run -d \
   --name "${CONTAINER_NAME}" \
-  -e MONITOR_SITE_ADDRESS=:8080 \
   -p 127.0.0.1::8080 \
   "${IMAGE_NAME}" >/dev/null
 

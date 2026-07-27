@@ -1,129 +1,110 @@
 # OCI ARM Monitor
 
-面向 Oracle Cloud ARM 实例的自托管监控与成本面板。系统从 OCI API 读取实例、指标、流量和费用数据，并将同步结果保存在服务器本地 SQLite 中。
+OCI ARM Monitor 是一个可自托管的 Oracle Cloud Infrastructure 资源监控面板，用于查看 Compute 实例、运行状态、流量、免费额度和费用数据。
 
-## 主要功能
+## 功能
 
-- 总览：实例数量、费用、出站流量、免费额度使用率和风险提醒。
-- 实例：运行状态、公网/内网 IP、CPU 和内存趋势。
-- 流量：本月入站、出站流量及免费额度进度。
-- 成本：OCI Usage API 账单明细和手工费用记录。
-- 服务器状态：宿主机 CPU、内存、磁盘、网络、JVM 和 SQLite 状态。
-- 同步中心：手动同步、定时同步、同步进度和历史结果。
-- 系统设置：OCI 配置状态、连接诊断和免费额度配置。
+- OCI Compute 实例和网络信息同步
+- CPU、内存、磁盘、运行时间和流量监控
+- 免费额度与费用汇总
+- OCI 连接诊断和定时同步
+- Instance Principal 和 API Key 两种认证方式
+- 前端、后端和 SQLite 一体化 Docker Compose 部署
 
-## 部署方式
-
-默认使用两个 Docker 容器：
+## 部署架构
 
 ```text
-浏览器
-  |
-  | HTTP 或 HTTPS
-  v
-oci-arm-monitor-web
-  |-- 前端静态页面
-  |-- /api/* 反向代理
-  v
-oci-arm-monitor-server
-  |-- Spring Boot
-  |-- SQLite
-  |-- OCI SDK
+浏览器 https://monitor.example.com
+              |
+      Nginx / OpenResty / 1Panel
+              |
+       http://127.0.0.1:28461
+              |
+       oci-arm-monitor-web
+       |-- 前端静态页面
+       |-- /api/* 反向代理
+              |
+  oci-arm-monitor-server:9090
 ```
 
-服务器只需要 Docker、Docker Compose、`curl` 和 `jq`，不需要安装 Nginx、Node.js、pnpm、Java 或 Certbot。后端 `9090` 默认只在 Docker 网络内可用。
+容器只在宿主机回环地址暴露一个 Web 端口。域名、证书、TLS 和公网入口由服务器已有的 Nginx、OpenResty 或 1Panel 管理；容器不会申请、保存或续期证书。后端 `9090` 只在 Docker 网络内可用。
 
-## 快速开始
+## 快速部署
 
-1. 获取项目并进入目录：
+服务器需要 Docker、Docker Compose、`git`、`curl` 和 `jq`。
 
 ```bash
-git clone <repository-url> oci-arm-monitor
+git clone https://github.com/Regltim/oci-arm-monitor.git
 cd oci-arm-monitor
-```
-
-2. 运行初始化脚本：
-
-```bash
 bash scripts/init-deploy.sh
-```
-
-初始化时可选择：
-
-| 模式 | 访问地址 | 网络要求 |
-| --- | --- | --- |
-| HTTP | `http://<server-ip>:8080` | 放行所选 TCP 端口，默认 `8080` |
-| HTTPS | `https://monitor.example.com` | 域名解析到服务器，放行 TCP `80/443` |
-
-3. 启动前端和后端：
-
-```bash
 docker compose config --quiet
 docker compose up -d --build
 docker compose ps
 ```
 
-脚本会在结束时打印最终访问地址。首次登录使用初始化时设置的管理员账号和密码。
-
-如果应用部署在 OCI Compute 实例上，推荐使用 Instance Principal。初始化脚本会自动读取 Instance Metadata，并生成可复制到 OCI Cloud Shell 的 IAM 配置命令。完整步骤见 [Oracle ARM 两步快速部署](docs/quick-deploy.md)。
-
-如果应用不在 OCI 实例上，选择 `config_file`，按 [OCI 接入说明](docs/oci-setup.md) 准备 API Key 和 OCI config。
-
-## 首次使用
-
-登录后进入：
+初始化时填写用户最终访问的完整 Origin，例如：
 
 ```text
-系统设置 -> OCI 配置 -> 运行 OCI 连接诊断
+https://monitor.example.com
 ```
 
-诊断通过后点击“同步 OCI 数据”。同步任务在后端运行，可在“同步中心”查看当前步骤和历史结果。
+默认 Web 端口为不常见的 `28461`，并固定绑定 `127.0.0.1`。脚本结束后会打印：
 
-默认同步范围：
+```text
+公开访问地址：https://monitor.example.com
+Nginx/OpenResty 反向代理目标：http://127.0.0.1:28461
+```
 
-- 实例和网卡：当前快照。
-- CPU 和内存：最近 48 小时。
-- 流量：当前自然月。
-- Usage API 费用：当前自然月已完成的 UTC 日期。
+## 配置反向代理
 
-默认定时同步为每天 `00:00`（`Asia/Shanghai`），可在同步中心修改。
+Nginx / OpenResty 站点只需把整个域名代理到 Web 容器：
 
-## 数据与安全
+```nginx
+location / {
+    proxy_pass http://127.0.0.1:28461;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+```
 
-- 系统不内置业务演示资源，不会把样例数据显示成真实 OCI 数据。
-- Instance Principal 模式不需要在服务器保存 OCI API 私钥。
-- API Key 模式的 `.env`、`deploy/oci/`、私钥和 SQLite 数据均由 Git 忽略。
-- 登录使用服务端 Session 和 HttpOnly Cookie。
-- HTTP/HTTPS 模式会自动生成匹配的 Origin 和 Cookie 配置。
-- Caddy 状态、HTTPS 证书和 SQLite 数据使用 Docker volume 持久化。
+1Panel 中创建“反向代理”网站时，代理地址填写 `http://127.0.0.1:28461`。不要把 `28461` 对公网放行，也不要把代理目标写成后端 `9090`。
+
+## OCI 认证
+
+应用部署在 OCI Compute 实例时，推荐使用 Instance Principal，不需要在服务器保存 OCI API 私钥。初始化脚本会读取 Instance Metadata，并输出可在 OCI Cloud Shell 执行的 Dynamic Group 和 Policy 配置命令。
+
+部署在其他云或本地服务器时，可使用 `config_file` 模式挂载 OCI API Key。
+
+- [Oracle ARM 两步快速部署](docs/quick-deploy.md)
+- [OCI 接入说明](docs/oci-setup.md)
+- [Oracle 控制台通俗配置流程](docs/oracle-console-simple-guide.md)
+- [完整 Docker Compose 部署](docs/fresh-deploy-docker-compose.md)
+- [Docker 容器与数据说明](docs/docker-backend.md)
 
 ## 常用命令
 
 ```bash
 docker compose ps
 docker compose logs -f
-docker compose logs --tail=200 oci-arm-monitor-web
-docker compose logs --tail=200 oci-arm-monitor-server
+docker compose up -d --build
+docker compose down
 ```
 
-更新版本：
+更新：
 
 ```bash
 git pull --ff-only
+bash scripts/init-deploy.sh
 docker compose up -d --build
 ```
 
-## 文档
+SQLite 数据保存在 Docker 命名卷 `oci-arm-monitor-data`。不要在未备份时执行 `docker compose down --volumes`。
 
-- [Oracle ARM 两步快速部署](docs/quick-deploy.md)
-- [全新服务器部署手册](docs/fresh-deploy-docker-compose.md)
-- [Docker 容器与数据说明](docs/docker-backend.md)
-- [OCI 接入说明](docs/oci-setup.md)
-- [Oracle 控制台通俗配置流程](docs/oracle-console-simple-guide.md)
+## 开源安全
 
-## 使用边界
-
-- 费用数据来自 OCI Usage API，不读取对象存储中的 Cost Reports CSV。
-- Monitoring 是否产生费用取决于 Oracle 当前价格与查询规模，部署前请核对官方价格表。
-- 项目不会自动修改 OCI Security List、NSG、操作系统防火墙或 DNS。
-- 没有正确的 OCI 认证、IAM Policy 和实例监控插件时，页面只能显示配置状态和空态，不能同步云端数据。
+- `.env`、`deploy/oci/`、私钥、SQLite 数据和构建产物均由 Git 忽略。
+- 公开仓库只保留示例域名、示例 OCID 和占位凭据。
+- 发布前可运行 `bash scripts/check-public-release.sh` 检查敏感内容。
