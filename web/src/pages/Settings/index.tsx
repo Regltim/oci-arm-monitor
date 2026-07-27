@@ -15,6 +15,7 @@ import { formatDateTime } from '@/utils/format';
 import { Alert, Button, Card, Descriptions, Form, Input, InputNumber, Space, Steps, Table, Tag, Tabs, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { useState } from 'react';
+import WechatNotificationSettings from './WechatNotificationSettings';
 
 type StepStatus = 'wait' | 'process' | 'finish' | 'error';
 
@@ -175,7 +176,7 @@ export default function SettingsPage() {
       <div className="page-header">
         <div>
           <h1 className="page-title">系统设置</h1>
-          <p className="page-subtitle">OCI 连接信息由后端环境变量和服务器 config 管理，前端只负责查看状态、同步数据和维护免费额度。</p>
+          <p className="page-subtitle">维护 OCI 连接状态、免费额度、微信公众号通知和管理员账号。</p>
         </div>
       </div>
 
@@ -287,6 +288,11 @@ export default function SettingsPage() {
                 </Form>
               </Card>
             ),
+          },
+          {
+            key: 'notification',
+            label: '通知设置',
+            children: <WechatNotificationSettings />,
           },
           {
             key: 'security',

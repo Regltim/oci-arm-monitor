@@ -159,6 +159,24 @@ validate_web_port() {
   [[ "$1" =~ ^[0-9]+$ ]] && [ "$1" -ge 1024 ] && [ "$1" -le 65535 ]
 }
 
+is_true() {
+  case "${1:-}" in
+    true|TRUE|True|1|yes|YES|y|Y) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+validate_daily_time() {
+  local value="$1"
+  local hour
+  local minute
+
+  [[ "${value}" =~ ^([0-9]{2}):([0-9]{2})$ ]] || return 1
+  hour="${BASH_REMATCH[1]}"
+  minute="${BASH_REMATCH[2]}"
+  [ "$((10#${hour}))" -le 23 ] && [ "$((10#${minute}))" -le 59 ]
+}
+
 validate_hostname() {
   local value="$1"
   local label
@@ -248,6 +266,110 @@ collect_access_settings() {
     configure_public_access "${public_url}" "${web_port}" && return 0
     warn "公开访问 Origin 或 Web 端口格式不正确。Origin 不能包含路径、查询参数或末尾斜杠。"
   done
+}
+
+collect_wechat_settings() {
+  local enabled_default
+  local immediate_default
+  local daily_default
+  local daily_time_default
+  local zone_id_default
+
+  MONITOR_WECHAT_APP_ID="$(read_env_value MONITOR_WECHAT_APP_ID || true)"
+  MONITOR_WECHAT_APP_SECRET="$(read_env_value MONITOR_WECHAT_APP_SECRET || true)"
+  MONITOR_WECHAT_TEMPLATE_ID="$(read_env_value MONITOR_WECHAT_TEMPLATE_ID || true)"
+  MONITOR_WECHAT_OPEN_IDS="$(read_env_value MONITOR_WECHAT_OPEN_IDS || true)"
+  enabled_default="$(read_env_value MONITOR_WECHAT_ENABLED || true)"
+  immediate_default="$(read_env_value MONITOR_WECHAT_IMMEDIATE_PUSH_ENABLED || true)"
+  daily_default="$(read_env_value MONITOR_WECHAT_DAILY_SUMMARY_ENABLED || true)"
+  daily_time_default="$(read_env_value MONITOR_WECHAT_DAILY_SUMMARY_TIME || true)"
+  zone_id_default="$(read_env_value MONITOR_WECHAT_ZONE_ID || true)"
+
+  immediate_default="${immediate_default:-true}"
+  daily_default="${daily_default:-false}"
+  daily_time_default="${daily_time_default:-09:00}"
+  zone_id_default="${zone_id_default:-Asia/Shanghai}"
+
+  if is_true "${enabled_default}"; then
+    if confirm "是否启用微信公众号通知" "y"; then
+      MONITOR_WECHAT_ENABLED="true"
+    else
+      MONITOR_WECHAT_ENABLED="false"
+    fi
+  elif confirm "是否启用微信公众号通知" "n"; then
+    MONITOR_WECHAT_ENABLED="true"
+  else
+    MONITOR_WECHAT_ENABLED="false"
+  fi
+
+  if [ "${MONITOR_WECHAT_ENABLED}" != "true" ]; then
+    MONITOR_WECHAT_IMMEDIATE_PUSH_ENABLED="${immediate_default}"
+    MONITOR_WECHAT_DAILY_SUMMARY_ENABLED="${daily_default}"
+    MONITOR_WECHAT_DAILY_SUMMARY_TIME="${daily_time_default}"
+    MONITOR_WECHAT_ZONE_ID="${zone_id_default}"
+    return 0
+  fi
+
+  ask_with_hidden_default MONITOR_WECHAT_APP_ID "微信公众号 AppID" "${MONITOR_WECHAT_APP_ID}" true
+  ask_secret MONITOR_WECHAT_APP_SECRET "微信公众号 AppSecret" "${MONITOR_WECHAT_APP_SECRET}" true
+  ask_with_hidden_default MONITOR_WECHAT_TEMPLATE_ID "微信公众号 Template ID" "${MONITOR_WECHAT_TEMPLATE_ID}" true
+  ask_with_hidden_default MONITOR_WECHAT_OPEN_IDS "接收人 OpenID（多个用逗号分隔）" "${MONITOR_WECHAT_OPEN_IDS}" true
+
+  if is_true "${immediate_default}"; then
+    if confirm "告警状态变化时是否立即推送" "y"; then
+      MONITOR_WECHAT_IMMEDIATE_PUSH_ENABLED="true"
+    else
+      MONITOR_WECHAT_IMMEDIATE_PUSH_ENABLED="false"
+    fi
+  elif confirm "告警状态变化时是否立即推送" "n"; then
+    MONITOR_WECHAT_IMMEDIATE_PUSH_ENABLED="true"
+  else
+    MONITOR_WECHAT_IMMEDIATE_PUSH_ENABLED="false"
+  fi
+
+  if is_true "${daily_default}"; then
+    if confirm "是否启用每日状态摘要" "y"; then
+      MONITOR_WECHAT_DAILY_SUMMARY_ENABLED="true"
+    else
+      MONITOR_WECHAT_DAILY_SUMMARY_ENABLED="false"
+    fi
+  elif confirm "是否启用每日状态摘要" "n"; then
+    MONITOR_WECHAT_DAILY_SUMMARY_ENABLED="true"
+  else
+    MONITOR_WECHAT_DAILY_SUMMARY_ENABLED="false"
+  fi
+
+  MONITOR_WECHAT_DAILY_SUMMARY_TIME="${daily_time_default}"
+  MONITOR_WECHAT_ZONE_ID="${zone_id_default}"
+  if [ "${MONITOR_WECHAT_DAILY_SUMMARY_ENABLED}" = "true" ]; then
+    while true; do
+      ask MONITOR_WECHAT_DAILY_SUMMARY_TIME "每日状态摘要推送时间（HH:mm）" "${daily_time_default}" true
+      validate_daily_time "${MONITOR_WECHAT_DAILY_SUMMARY_TIME}" && break
+      warn "每日推送时间格式必须为 HH:mm，例如 09:00。"
+    done
+    ask MONITOR_WECHAT_ZONE_ID "每日状态摘要时区" "${zone_id_default}" true
+  fi
+}
+
+ensure_settings_encryption_key() {
+  if [ -z "${MONITOR_SETTINGS_ENCRYPTION_KEY:-}" ]; then
+    MONITOR_SETTINGS_ENCRYPTION_KEY="$(read_env_value MONITOR_SETTINGS_ENCRYPTION_KEY || true)"
+  fi
+  if [ -n "${MONITOR_SETTINGS_ENCRYPTION_KEY}" ]; then
+    return 0
+  fi
+
+  if command -v openssl >/dev/null 2>&1; then
+    MONITOR_SETTINGS_ENCRYPTION_KEY="$(openssl rand -base64 32 | tr -d '\r\n')"
+  elif command -v base64 >/dev/null 2>&1; then
+    MONITOR_SETTINGS_ENCRYPTION_KEY="$(dd if=/dev/urandom bs=32 count=1 2>/dev/null | base64 | tr -d '\r\n')"
+  else
+    warn "缺少 openssl 或 base64，无法生成通知配置加密密钥。"
+    return 1
+  fi
+
+  [ -n "${MONITOR_SETTINGS_ENCRYPTION_KEY}" ] || return 1
+  ok "已生成通知配置加密密钥"
 }
 
 detect_instance_metadata() {
@@ -343,6 +465,16 @@ write_env_file() {
     write_env_entry "MONITOR_SERVER_METRICS_ENABLED" "${MONITOR_SERVER_METRICS_ENABLED}"
     write_env_entry "MONITOR_SERVER_METRICS_SAMPLE_DELAY_MILLIS" "${MONITOR_SERVER_METRICS_SAMPLE_DELAY_MILLIS}"
     write_env_entry "MONITOR_SERVER_HISTORY_RETENTION_HOURS" "${MONITOR_SERVER_HISTORY_RETENTION_HOURS}"
+    write_env_entry "MONITOR_WECHAT_ENABLED" "${MONITOR_WECHAT_ENABLED}"
+    write_env_entry "MONITOR_WECHAT_APP_ID" "${MONITOR_WECHAT_APP_ID}"
+    write_env_entry "MONITOR_WECHAT_APP_SECRET" "${MONITOR_WECHAT_APP_SECRET}"
+    write_env_entry "MONITOR_WECHAT_TEMPLATE_ID" "${MONITOR_WECHAT_TEMPLATE_ID}"
+    write_env_entry "MONITOR_WECHAT_OPEN_IDS" "${MONITOR_WECHAT_OPEN_IDS}"
+    write_env_entry "MONITOR_WECHAT_IMMEDIATE_PUSH_ENABLED" "${MONITOR_WECHAT_IMMEDIATE_PUSH_ENABLED}"
+    write_env_entry "MONITOR_WECHAT_DAILY_SUMMARY_ENABLED" "${MONITOR_WECHAT_DAILY_SUMMARY_ENABLED}"
+    write_env_entry "MONITOR_WECHAT_DAILY_SUMMARY_TIME" "${MONITOR_WECHAT_DAILY_SUMMARY_TIME}"
+    write_env_entry "MONITOR_WECHAT_ZONE_ID" "${MONITOR_WECHAT_ZONE_ID}"
+    write_env_entry "MONITOR_SETTINGS_ENCRYPTION_KEY" "${MONITOR_SETTINGS_ENCRYPTION_KEY}"
   } > "${tmp_file}"
 
   if [ -f "${ENV_FILE}" ]; then
@@ -580,6 +712,10 @@ main() {
   MONITOR_SERVER_METRICS_SAMPLE_DELAY_MILLIS="${MONITOR_SERVER_METRICS_SAMPLE_DELAY_MILLIS:-15000}"
   MONITOR_SERVER_HISTORY_RETENTION_HOURS="$(read_env_value MONITOR_SERVER_HISTORY_RETENTION_HOURS || true)"
   MONITOR_SERVER_HISTORY_RETENTION_HOURS="${MONITOR_SERVER_HISTORY_RETENTION_HOURS:-72}"
+
+  collect_wechat_settings
+  MONITOR_SETTINGS_ENCRYPTION_KEY="$(read_env_value MONITOR_SETTINGS_ENCRYPTION_KEY || true)"
+  ensure_settings_encryption_key
 
   write_env_file
 

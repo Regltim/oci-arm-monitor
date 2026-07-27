@@ -70,7 +70,7 @@ public class ServerAlertService {
     };
   }
 
-  private double syncAgeHours(Optional<SyncResult> latestSyncResult) {
+  public double syncAgeHours(Optional<SyncResult> latestSyncResult) {
     if (latestSyncResult.isEmpty()) {
       return 999;
     }

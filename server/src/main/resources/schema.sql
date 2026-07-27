@@ -159,6 +159,53 @@ CREATE TABLE IF NOT EXISTS alert_rule (
   updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS wechat_notification_setting (
+  id TEXT PRIMARY KEY,
+  enabled INTEGER NOT NULL,
+  encrypted_app_id TEXT NOT NULL,
+  encrypted_app_secret TEXT NOT NULL,
+  encrypted_template_id TEXT NOT NULL,
+  encrypted_open_ids TEXT NOT NULL,
+  public_url TEXT NOT NULL,
+  immediate_push_enabled INTEGER NOT NULL,
+  daily_summary_enabled INTEGER NOT NULL,
+  daily_summary_time TEXT NOT NULL,
+  zone_id TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS alert_notification_state (
+  metric_name TEXT PRIMARY KEY,
+  active INTEGER NOT NULL,
+  severity TEXT NOT NULL,
+  title TEXT NOT NULL,
+  description TEXT NOT NULL,
+  current_value REAL NOT NULL,
+  threshold REAL NOT NULL,
+  unit TEXT NOT NULL,
+  changed_at TEXT NOT NULL,
+  last_notified_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS wechat_delivery_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  notification_type TEXT NOT NULL,
+  metric_name TEXT NOT NULL,
+  success_count INTEGER NOT NULL,
+  failure_count INTEGER NOT NULL,
+  message TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_wechat_delivery_created_at
+  ON wechat_delivery_log(created_at);
+
+CREATE TABLE IF NOT EXISTS wechat_daily_summary_state (
+  id TEXT PRIMARY KEY,
+  last_attempted_date TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
 INSERT OR IGNORE INTO sync_schedule(id, enabled, cron_expression, zone_id, sync_on_startup, updated_at)
 VALUES ('default', 1, '0 0 0 * * *', 'Asia/Shanghai', 0, datetime('now'));
 

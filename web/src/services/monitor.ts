@@ -20,6 +20,9 @@ import type {
   SyncScheduleUpdateRequest,
   SyncStatus,
   TrafficSummary,
+  WechatDeliveryResult,
+  WechatNotificationSettingsStatus,
+  WechatNotificationSettingsUpdateRequest,
 } from '@/types/api';
 import { deleteApiData, getApiData, postApiData, putApiData } from './request';
 
@@ -84,6 +87,27 @@ export function getOciSettingsStatus(): Promise<OciSettingsStatus> {
 
 export function diagnoseOciSettings(): Promise<OciDiagnosticsResult> {
   return getApiData<OciDiagnosticsResult>('/api/settings/oci/diagnostics');
+}
+
+export function getWechatNotificationSettings(): Promise<WechatNotificationSettingsStatus> {
+  return getApiData<WechatNotificationSettingsStatus>('/api/settings/wechat');
+}
+
+export function updateWechatNotificationSettings(
+  data: WechatNotificationSettingsUpdateRequest,
+): Promise<WechatNotificationSettingsStatus> {
+  return putApiData<WechatNotificationSettingsStatus, WechatNotificationSettingsUpdateRequest>(
+    '/api/settings/wechat',
+    data,
+  );
+}
+
+export function sendWechatTestNotification(): Promise<WechatDeliveryResult> {
+  return postApiData<WechatDeliveryResult, Record<string, never>>('/api/settings/wechat/test', {});
+}
+
+export function listWechatNotificationDeliveries(): Promise<WechatDeliveryResult[]> {
+  return getApiData<WechatDeliveryResult[]>('/api/settings/wechat/deliveries');
 }
 
 export function syncResources(): Promise<SyncResult> {

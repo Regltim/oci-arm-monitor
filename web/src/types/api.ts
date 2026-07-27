@@ -179,6 +179,45 @@ export interface OciDiagnosticsResult {
   nextActions: string[];
 }
 
+export interface WechatNotificationSettingsStatus {
+  enabled: boolean;
+  configured: boolean;
+  source: 'DATABASE' | 'ENVIRONMENT' | 'NONE';
+  appIdMasked: string;
+  appSecretConfigured: boolean;
+  templateIdMasked: string;
+  recipientCount: number;
+  publicUrl: string;
+  immediatePushEnabled: boolean;
+  dailySummaryEnabled: boolean;
+  dailySummaryTime: string;
+  zoneId: string;
+  encryptionReady: boolean;
+  updatedAt: string;
+}
+
+export interface WechatNotificationSettingsUpdateRequest {
+  enabled: boolean;
+  appId?: string;
+  appSecret?: string;
+  templateId?: string;
+  openIds?: string;
+  publicUrl: string;
+  immediatePushEnabled: boolean;
+  dailySummaryEnabled: boolean;
+  dailySummaryTime: string;
+  zoneId: string;
+}
+
+export interface WechatDeliveryResult {
+  notificationType: 'TEST' | 'ALERT' | 'RECOVERY' | 'DAILY_SUMMARY' | 'ALERT_TRANSITION';
+  metricName: string;
+  successCount: number;
+  failureCount: number;
+  message: string;
+  createdAt: string;
+}
+
 export interface SyncResult {
   status: string;
   message: string;

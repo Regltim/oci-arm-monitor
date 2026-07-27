@@ -8,6 +8,7 @@ OCI ARM Monitor 是一个可自托管的 Oracle Cloud Infrastructure 资源监�
 - CPU、内存、磁盘、运行时间和流量监控
 - 免费额度与费用汇总
 - OCI 连接诊断和定时同步
+- 微信公众号告警、恢复和每日状态摘要
 - Instance Principal 和 API Key 两种认证方式
 - 前端、后端和 SQLite 一体化 Docker Compose 部署
 
@@ -83,6 +84,7 @@ location / {
 - [Oracle 控制台通俗配置流程](docs/oracle-console-simple-guide.md)
 - [完整 Docker Compose 部署](docs/fresh-deploy-docker-compose.md)
 - [Docker 容器与数据说明](docs/docker-backend.md)
+- [微信公众号通知配置](docs/wechat-notifications.md)
 
 ## 常用命令
 

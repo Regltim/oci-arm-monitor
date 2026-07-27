@@ -36,5 +36,18 @@ monitor:
     history-retention-hours: ${MONITOR_SERVER_HISTORY_RETENTION_HOURS:72}
     proc-path: ${MONITOR_SERVER_PROC_PATH:/host/proc}
     disk-path: ${MONITOR_SERVER_DISK_PATH:/data}
+  wechat:
+    enabled: ${MONITOR_WECHAT_ENABLED:false}
+    app-id: ${MONITOR_WECHAT_APP_ID:}
+    app-secret: ${MONITOR_WECHAT_APP_SECRET:}
+    template-id: ${MONITOR_WECHAT_TEMPLATE_ID:}
+    open-ids: ${MONITOR_WECHAT_OPEN_IDS:}
+    immediate-push-enabled: ${MONITOR_WECHAT_IMMEDIATE_PUSH_ENABLED:true}
+    daily-summary-enabled: ${MONITOR_WECHAT_DAILY_SUMMARY_ENABLED:false}
+    daily-summary-time: ${MONITOR_WECHAT_DAILY_SUMMARY_TIME:09:00}
+    zone-id: ${MONITOR_WECHAT_ZONE_ID:Asia/Shanghai}
+    public-url: ${MONITOR_PUBLIC_URL:}
+    api-base-url: ${MONITOR_WECHAT_API_BASE_URL:https://api.weixin.qq.com}
+    settings-encryption-key: ${MONITOR_SETTINGS_ENCRYPTION_KEY:}
   cors:
     allowed-origins: ${MONITOR_CORS_ALLOWED_ORIGINS:http://localhost:8000,http://127.0.0.1:8000,http://localhost:8001,http://127.0.0.1:8001}

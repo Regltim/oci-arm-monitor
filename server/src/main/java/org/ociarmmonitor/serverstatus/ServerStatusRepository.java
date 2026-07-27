@@ -6,6 +6,7 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -102,6 +103,22 @@ public class ServerStatusRepository {
     return points;
   }
 
+  public Optional<ServerStatusSnapshot> latest() {
+    List<ServerStatusSnapshot> snapshots = jdbcTemplate.query("""
+      SELECT sampled_at, cpu_usage_percent, load_one, load_five, load_fifteen,
+        memory_total_bytes, memory_available_bytes, memory_usage_percent,
+        swap_total_bytes, swap_free_bytes, swap_usage_percent,
+        disk_total_bytes, disk_usable_bytes, disk_usage_percent,
+        network_rx_bytes, network_tx_bytes, network_rx_bytes_per_second, network_tx_bytes_per_second,
+        uptime_seconds, process_uptime_seconds, jvm_memory_used_bytes, jvm_memory_max_bytes,
+        jvm_thread_count, database_size_bytes
+      FROM server_status_snapshot
+      ORDER BY sampled_at DESC
+      LIMIT 1
+      """, (resultSet, rowNum) -> mapSnapshot(resultSet));
+    return snapshots.stream().findFirst();
+  }
+
   public void deleteExpired() {
     String before = Instant.now().minus(Math.max(retentionHours, 1), ChronoUnit.HOURS).toString();
     jdbcTemplate.update("DELETE FROM server_status_snapshot WHERE sampled_at < ?", before);
@@ -115,6 +132,35 @@ public class ServerStatusRepository {
       resultSet.getDouble("disk_usage_percent"),
       resultSet.getDouble("network_rx_bytes_per_second"),
       resultSet.getDouble("network_tx_bytes_per_second")
+    );
+  }
+
+  private ServerStatusSnapshot mapSnapshot(ResultSet resultSet) throws SQLException {
+    return new ServerStatusSnapshot(
+      resultSet.getString("sampled_at"),
+      resultSet.getDouble("cpu_usage_percent"),
+      resultSet.getDouble("load_one"),
+      resultSet.getDouble("load_five"),
+      resultSet.getDouble("load_fifteen"),
+      resultSet.getLong("memory_total_bytes"),
+      resultSet.getLong("memory_available_bytes"),
+      resultSet.getDouble("memory_usage_percent"),
+      resultSet.getLong("swap_total_bytes"),
+      resultSet.getLong("swap_free_bytes"),
+      resultSet.getDouble("swap_usage_percent"),
+      resultSet.getLong("disk_total_bytes"),
+      resultSet.getLong("disk_usable_bytes"),
+      resultSet.getDouble("disk_usage_percent"),
+      resultSet.getLong("network_rx_bytes"),
+      resultSet.getLong("network_tx_bytes"),
+      resultSet.getDouble("network_rx_bytes_per_second"),
+      resultSet.getDouble("network_tx_bytes_per_second"),
+      resultSet.getLong("uptime_seconds"),
+      resultSet.getLong("process_uptime_seconds"),
+      resultSet.getLong("jvm_memory_used_bytes"),
+      resultSet.getLong("jvm_memory_max_bytes"),
+      resultSet.getInt("jvm_thread_count"),
+      resultSet.getLong("database_size_bytes")
     );
   }
 }
