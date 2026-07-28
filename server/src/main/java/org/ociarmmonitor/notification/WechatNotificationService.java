@@ -23,6 +23,7 @@ public class WechatNotificationService {
 
   private final WechatNotificationSettingsRepository settingsRepository;
   private final WechatTemplateSender templateSender;
+  private final DailyReportDataProvider dailyReportDataProvider;
   private final DailyReportMessageAssembler dailyReportMessageAssembler;
   private final PublicReportService publicReportService;
   private final Clock clock;
@@ -31,16 +32,23 @@ public class WechatNotificationService {
   public WechatNotificationService(
     WechatNotificationSettingsRepository settingsRepository,
     WechatTemplateSender templateSender,
+    DailyReportDataProvider dailyReportDataProvider,
     PublicReportService publicReportService
   ) {
-    this(settingsRepository, templateSender, publicReportService, Clock.systemUTC());
+    this(
+      settingsRepository,
+      templateSender,
+      dailyReportDataProvider,
+      publicReportService,
+      Clock.systemUTC()
+    );
   }
 
   public WechatNotificationService(
     WechatNotificationSettingsRepository settingsRepository,
     WechatTemplateSender templateSender
   ) {
-    this(settingsRepository, templateSender, null, Clock.systemUTC());
+    this(settingsRepository, templateSender, null, null, Clock.systemUTC());
   }
 
   WechatNotificationService(
@@ -48,7 +56,7 @@ public class WechatNotificationService {
     WechatTemplateSender templateSender,
     Clock clock
   ) {
-    this(settingsRepository, templateSender, null, clock);
+    this(settingsRepository, templateSender, null, null, clock);
   }
 
   WechatNotificationService(
@@ -57,8 +65,19 @@ public class WechatNotificationService {
     PublicReportService publicReportService,
     Clock clock
   ) {
+    this(settingsRepository, templateSender, null, publicReportService, clock);
+  }
+
+  WechatNotificationService(
+    WechatNotificationSettingsRepository settingsRepository,
+    WechatTemplateSender templateSender,
+    DailyReportDataProvider dailyReportDataProvider,
+    PublicReportService publicReportService,
+    Clock clock
+  ) {
     this.settingsRepository = settingsRepository;
     this.templateSender = templateSender;
+    this.dailyReportDataProvider = dailyReportDataProvider;
     this.dailyReportMessageAssembler = new DailyReportMessageAssembler();
     this.publicReportService = publicReportService;
     this.clock = clock;
@@ -66,17 +85,20 @@ public class WechatNotificationService {
 
   public WechatTestDeliveryResult sendTest() {
     WechatNotificationSettings settings = requireAvailableSettings();
+    if (dailyReportDataProvider == null) {
+      throw new IllegalStateException("日报数据服务不可用");
+    }
+    DailyReportData data = dailyReportDataProvider.load(
+      DailyReportContext.from(clock, settings.zoneId())
+    );
+    PublicReportSnapshot statusSnapshot = createDetailSnapshot(data, settings);
     WechatDeliveryResult status = deliver(
       "TEST_STATUS",
       "",
       settings,
       WechatTemplateType.STATUS,
-      new WechatTemplateMessage(
-        "OCI ARM Monitor 运行模板测试",
-        "模板：运行状态",
-        "结果：测试成功",
-        "时间：" + messageTime(settings)
-      )
+      dailyReportMessageAssembler.statusMessages(data),
+      statusSnapshot
     );
     WechatDeliveryResult costTraffic = settings.costTemplateId().isBlank()
       ? unavailableCostTemplateResult(settings)
@@ -85,12 +107,8 @@ public class WechatNotificationService {
         "",
         settings,
         WechatTemplateType.COST_TRAFFIC,
-        new WechatTemplateMessage(
-          "OCI ARM Monitor 费用与流量模板测试",
-          "模板：费用与流量",
-          "结果：测试成功",
-          "时间：" + messageTime(settings)
-        )
+        dailyReportMessageAssembler.costTrafficMessage(data),
+        createDetailSnapshot(data, settings)
       );
     int successCount = status.successCount() + costTraffic.successCount();
     int failureCount = status.failureCount() + costTraffic.failureCount();
@@ -99,7 +117,7 @@ public class WechatNotificationService {
       costTraffic,
       successCount,
       failureCount,
-      "测试发送完成：成功 " + successCount + "，失败 " + failureCount
+      "当前数据推送完成：成功 " + successCount + "，失败 " + failureCount
     );
   }
 

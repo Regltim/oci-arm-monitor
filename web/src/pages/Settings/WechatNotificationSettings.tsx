@@ -42,8 +42,8 @@ const zoneOptions = [
 
 const deliveryTypeMap: Record<WechatDeliveryResult['notificationType'], string> = {
   TEST: '历史测试',
-  TEST_STATUS: '运行模板测试',
-  TEST_COST_TRAFFIC: '费用流量模板测试',
+  TEST_STATUS: '运行数据推送',
+  TEST_COST_TRAFFIC: '费用流量数据推送',
   ALERT: '告警',
   RECOVERY: '恢复',
   DAILY_SUMMARY: '历史每日摘要',
@@ -340,7 +340,7 @@ export default function WechatNotificationSettings() {
                 disabled={!status?.enabled || !status.configured}
                 onClick={handleSendTest}
               >
-                测试两个模板
+                推送当前数据
               </Button>
               <Button
                 type="link"
@@ -359,8 +359,8 @@ export default function WechatNotificationSettings() {
                 message={testResult.message}
                 description={(
                   <Space direction="vertical" size={4}>
-                    <TestDeliveryOutcome label="运行状态模板" result={testResult.status} />
-                    <TestDeliveryOutcome label="费用与流量模板" result={testResult.costTraffic} />
+                    <TestDeliveryOutcome label="运行状态" result={testResult.status} />
+                    <TestDeliveryOutcome label="费用与流量" result={testResult.costTraffic} />
                   </Space>
                 )}
               />

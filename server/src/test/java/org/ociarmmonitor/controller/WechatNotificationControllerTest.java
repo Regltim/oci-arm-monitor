@@ -15,6 +15,13 @@ import java.util.Base64;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.ociarmmonitor.common.GlobalExceptionHandler;
+import org.ociarmmonitor.config.FreeQuotaRepository;
+import org.ociarmmonitor.cost.CostRepository;
+import org.ociarmmonitor.cost.CostService;
+import org.ociarmmonitor.cost.ManualCostRepository;
+import org.ociarmmonitor.instance.CloudInstanceRepository;
+import org.ociarmmonitor.instance.MetricRepository;
+import org.ociarmmonitor.notification.DailyReportDataProvider;
 import org.ociarmmonitor.notification.WechatDeliveryLogRepository;
 import org.ociarmmonitor.notification.WechatDeliveryResult;
 import org.ociarmmonitor.notification.WechatNotificationProperties;
@@ -24,6 +31,14 @@ import org.ociarmmonitor.notification.WechatSecretCipher;
 import org.ociarmmonitor.notification.WechatTemplateMessage;
 import org.ociarmmonitor.notification.WechatTemplateSender;
 import org.ociarmmonitor.notification.WechatTemplateType;
+import org.ociarmmonitor.oci.SyncRunRepository;
+import org.ociarmmonitor.publicreport.PublicReportService;
+import org.ociarmmonitor.publicreport.PublicReportSnapshotMapper;
+import org.ociarmmonitor.serverstatus.AlertRuleRepository;
+import org.ociarmmonitor.serverstatus.ServerAlertService;
+import org.ociarmmonitor.serverstatus.ServerStatusRepository;
+import org.ociarmmonitor.traffic.TrafficRepository;
+import org.ociarmmonitor.traffic.TrafficService;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.SingleConnectionDataSource;
@@ -104,7 +119,7 @@ class WechatNotificationControllerTest {
   }
 
   @Test
-  void sendsBothManualTestsAndRecordsSeparateSanitizedDeliveries() throws Exception {
+  void pushesCurrentDataAndRecordsSeparateSanitizedDeliveries() throws Exception {
     MvcResult mvcResult = mockMvc.perform(post("/settings/wechat/test"))
       .andExpect(status().isOk())
       .andExpect(jsonPath("$.data.status.notificationType").value("TEST_STATUS"))
@@ -216,9 +231,25 @@ class WechatNotificationControllerTest {
         sentMessages++;
       }
     };
+    DailyReportDataProvider dataProvider = new DailyReportDataProvider(
+      new CloudInstanceRepository(jdbcTemplate),
+      new MetricRepository(jdbcTemplate),
+      new ServerStatusRepository(jdbcTemplate, 72),
+      new ServerAlertService(new AlertRuleRepository(jdbcTemplate)),
+      new SyncRunRepository(jdbcTemplate),
+      new CostService(new CostRepository(jdbcTemplate), new ManualCostRepository(jdbcTemplate)),
+      new TrafficService(new TrafficRepository(jdbcTemplate), new FreeQuotaRepository(jdbcTemplate))
+    );
+    PublicReportService publicReportService = new PublicReportService(
+      jdbcTemplate,
+      objectMapper,
+      new PublicReportSnapshotMapper()
+    );
     WechatNotificationService notificationService = new WechatNotificationService(
       settingsRepository,
-      templateSender
+      templateSender,
+      dataProvider,
+      publicReportService
     );
     deliveryLogRepository = new WechatDeliveryLogRepository(jdbcTemplate);
     WechatNotificationController controller = new WechatNotificationController(

@@ -41,6 +41,7 @@ class WechatNotificationServiceTest {
 
   private JdbcTemplate jdbcTemplate;
   private CapturingSender sender;
+  private CountingDailyReportDataProvider dataProvider;
   private WechatNotificationService service;
 
   @BeforeEach
@@ -49,11 +50,12 @@ class WechatNotificationServiceTest {
     new ResourceDatabasePopulator(new ClassPathResource("schema.sql")).execute(dataSource);
     jdbcTemplate = new JdbcTemplate(dataSource);
     sender = new CapturingSender();
+    dataProvider = new CountingDailyReportDataProvider(dailyReportData());
     service = createService(properties(true, "template_example_cost"));
   }
 
   @Test
-  void sendsSeparateStatusAndCostTemplateTests() {
+  void sendsCurrentReportDataThroughBothTemplates() {
     WechatTestDeliveryResult result = service.sendTest();
 
     assertThat(result.status().notificationType()).isEqualTo("TEST_STATUS");
@@ -62,7 +64,7 @@ class WechatNotificationServiceTest {
     assertThat(result.costTraffic().successCount()).isEqualTo(2);
     assertThat(result.successCount()).isEqualTo(4);
     assertThat(result.failureCount()).isZero();
-    assertThat(result.message()).isEqualTo("测试发送完成：成功 4，失败 0");
+    assertThat(result.message()).isEqualTo("当前数据推送完成：成功 4，失败 0");
 
     assertThat(sender.deliveries).extracting(SentTemplate::templateType)
       .containsExactly(
@@ -70,17 +72,44 @@ class WechatNotificationServiceTest {
         WechatTemplateType.STATUS,
         WechatTemplateType.COST_TRAFFIC,
         WechatTemplateType.COST_TRAFFIC
-      );
+    );
     WechatTemplateMessage statusMessage = sender.deliveries.get(0).message();
-    assertThat(statusMessage.first()).isEqualTo("OCI ARM Monitor 运行模板测试");
-    assertThat(statusMessage.item1()).isEqualTo("模板：运行状态");
-    assertThat(statusMessage.item2()).isEqualTo("结果：测试成功");
-    assertThat(statusMessage.item3()).isEqualTo("时间：2026-07-27 09:00:00");
+    assertThat(statusMessage.first()).isEqualTo("OCI ARM Monitor 每日运行状态");
+    assertThat(statusMessage.item1()).isEqualTo("实例：暂无 OCI 实例数据");
+    assertThat(statusMessage.item2()).isEqualTo("主机：CPU 45.20%｜内存 61.30%｜磁盘 72.40%");
+    assertThat(statusMessage.item3())
+      .isEqualTo("告警：1 项｜同步：成功 2026-07-27 08:02:16（同步完成）");
     WechatTemplateMessage costMessage = sender.deliveries.get(2).message();
-    assertThat(costMessage.first()).isEqualTo("OCI ARM Monitor 费用与流量模板测试");
-    assertThat(costMessage.item1()).isEqualTo("模板：费用与流量");
-    assertThat(costMessage.item2()).isEqualTo("结果：测试成功");
-    assertThat(costMessage.item3()).isEqualTo("时间：2026-07-27 09:00:00");
+    assertThat(costMessage.first()).isEqualTo("OCI ARM Monitor 费用与流量");
+    assertThat(costMessage.item1())
+      .isEqualTo("费用：OCI ¥12.34｜手工 ¥8.00｜总计 ¥20.34｜预测 ¥28.62");
+    assertThat(costMessage.item2())
+      .isEqualTo("流量：入站 123.45 GB｜出站 67.89 GB｜额度 10,000.00 GB");
+    assertThat(costMessage.item3())
+      .isEqualTo("额度：已用 0.68%｜剩余 9,932.11 GB｜同步 2026-07-27 08:02:16");
+    assertThat(sender.deliveries).allSatisfy(delivery -> {
+      assertThat(List.of(
+        delivery.message().first(),
+        delivery.message().item1(),
+        delivery.message().item2(),
+        delivery.message().item3()
+      )).allSatisfy(value -> assertThat(value)
+        .doesNotContain("模板测试")
+        .doesNotContain("测试成功"));
+      assertThat(delivery.detailUrl())
+        .startsWith("https://monitor.example.com/#/r/")
+        .contains("?token=");
+    });
+    assertThat(sender.deliveries).extracting(SentTemplate::detailUrl).doesNotHaveDuplicates();
+    assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM public_report_snapshot", Integer.class)).isEqualTo(2);
+    assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM public_report_access", Integer.class)).isEqualTo(4);
+    assertThat(dataProvider.loadCount).isEqualTo(1);
+    assertThat(dataProvider.loadedContext).isEqualTo(new DailyReportContext(
+      FIXED_CLOCK.instant(),
+      ZoneId.of("Asia/Shanghai"),
+      LocalDate.of(2026, 7, 27),
+      YearMonth.of(2026, 7)
+    ));
   }
 
   @Test
@@ -175,7 +204,7 @@ class WechatNotificationServiceTest {
     assertThat(result.costTraffic().failureCount()).isEqualTo(1);
     assertThat(result.successCount()).isEqualTo(2);
     assertThat(result.failureCount()).isEqualTo(2);
-    assertThat(result.message()).isEqualTo("测试发送完成：成功 2，失败 2");
+    assertThat(result.message()).isEqualTo("当前数据推送完成：成功 2，失败 2");
     assertThat(result.message()).doesNotContain("openid_example_2");
   }
 
@@ -208,7 +237,13 @@ class WechatNotificationServiceTest {
       new ObjectMapper(),
       new PublicReportSnapshotMapper()
     );
-    return new WechatNotificationService(settingsRepository, sender, publicReportService, FIXED_CLOCK);
+    return new WechatNotificationService(
+      settingsRepository,
+      sender,
+      dataProvider,
+      publicReportService,
+      FIXED_CLOCK
+    );
   }
 
   private WechatNotificationProperties properties(boolean enabled, String costTemplateId) {
@@ -303,6 +338,25 @@ class WechatNotificationServiceTest {
     WechatTemplateMessage message,
     String detailUrl
   ) {
+  }
+
+  private static class CountingDailyReportDataProvider extends DailyReportDataProvider {
+
+    private final DailyReportData data;
+    private int loadCount;
+    private DailyReportContext loadedContext;
+
+    CountingDailyReportDataProvider(DailyReportData data) {
+      super(null, null, null, null, null, null, null);
+      this.data = data;
+    }
+
+    @Override
+    public DailyReportData load(DailyReportContext context) {
+      loadCount++;
+      loadedContext = context;
+      return data;
+    }
   }
 
   private static class CapturingSender implements WechatTemplateSender {
