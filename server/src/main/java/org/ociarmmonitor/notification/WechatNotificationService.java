@@ -4,6 +4,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.List;
 import org.ociarmmonitor.serverstatus.ServerAlert;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -46,12 +47,9 @@ public class WechatNotificationService {
       WechatTemplateType.STATUS,
       new WechatTemplateMessage(
         "OCI ARM Monitor 运行模板测试",
-        "信息",
-        "运行状态模板",
-        "测试成功",
-        "运行状态模板消息配置有效，可用于告警、恢复和每日运行状态。",
-        messageTime(settings),
-        "本消息仅用于验证公众号运行状态模板"
+        "模板：运行状态",
+        "结果：测试成功",
+        "时间：" + messageTime(settings)
       )
     );
     WechatDeliveryResult costTraffic = settings.costTemplateId().isBlank()
@@ -63,12 +61,9 @@ public class WechatNotificationService {
         WechatTemplateType.COST_TRAFFIC,
         new WechatTemplateMessage(
           "OCI ARM Monitor 费用与流量模板测试",
-          "信息",
-          "费用与流量模板",
-          "测试成功",
-          "费用与流量模板消息配置有效，可用于每日费用与流量摘要。",
-          messageTime(settings),
-          "本消息仅用于验证公众号费用与流量模板"
+          "模板：费用与流量",
+          "结果：测试成功",
+          "时间：" + messageTime(settings)
         )
       );
     int successCount = status.successCount() + costTraffic.successCount();
@@ -91,12 +86,9 @@ public class WechatNotificationService {
       WechatTemplateType.STATUS,
       new WechatTemplateMessage(
         "OCI ARM Monitor 告警通知",
-        "danger".equals(alert.severity()) ? "严重" : "警告",
-        alert.title(),
-        "告警触发",
-        alert.description(),
-        messageTime(settings),
-        "请及时检查对应指标和 OCI 同步状态"
+        "级别：" + ("danger".equals(alert.severity()) ? "严重" : "警告") + "｜指标：" + alert.title(),
+        "详情：" + alert.description(),
+        "时间：" + messageTime(settings)
       )
     );
   }
@@ -110,12 +102,9 @@ public class WechatNotificationService {
       WechatTemplateType.STATUS,
       new WechatTemplateMessage(
         "OCI ARM Monitor 恢复通知",
-        "恢复",
-        previousAlert.title(),
-        "已恢复",
-        previousAlert.title() + "已恢复至阈值范围内。",
-        messageTime(settings),
-        "指标已恢复，后续仍将持续监控"
+        "状态：已恢复｜指标：" + previousAlert.title(),
+        "说明：" + previousAlert.title() + "已恢复至阈值范围内。",
+        "时间：" + messageTime(settings)
       )
     );
   }
@@ -127,7 +116,7 @@ public class WechatNotificationService {
       "",
       settings,
       WechatTemplateType.STATUS,
-      dailyReportMessageAssembler.statusMessage(data)
+      dailyReportMessageAssembler.statusMessages(data)
     );
   }
 
@@ -163,14 +152,26 @@ public class WechatNotificationService {
     WechatTemplateType templateType,
     WechatTemplateMessage message
   ) {
+    return deliver(notificationType, metricName, settings, templateType, List.of(message));
+  }
+
+  private WechatDeliveryResult deliver(
+    String notificationType,
+    String metricName,
+    WechatNotificationSettings settings,
+    WechatTemplateType templateType,
+    List<WechatTemplateMessage> messages
+  ) {
     int successCount = 0;
     int failureCount = 0;
-    for (String openId : settings.openIds()) {
-      try {
-        templateSender.sendTemplate(settings, openId, templateType, message);
-        successCount++;
-      } catch (RuntimeException exception) {
-        failureCount++;
+    for (WechatTemplateMessage message : messages) {
+      for (String openId : settings.openIds()) {
+        try {
+          templateSender.sendTemplate(settings, openId, templateType, message);
+          successCount++;
+        } catch (RuntimeException exception) {
+          failureCount++;
+        }
       }
     }
     return new WechatDeliveryResult(

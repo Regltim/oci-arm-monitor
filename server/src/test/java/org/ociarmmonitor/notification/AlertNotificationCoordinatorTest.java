@@ -54,8 +54,8 @@ class AlertNotificationCoordinatorTest {
     restartedCoordinator.afterSample(snapshot(18));
 
     assertThat(sender.messages).hasSize(4);
-    assertThat(sender.messages.get(0).status()).isEqualTo("告警触发");
-    assertThat(sender.messages.get(2).status()).isEqualTo("已恢复");
+    assertThat(sender.messages.get(0).first()).isEqualTo("OCI ARM Monitor 告警通知");
+    assertThat(sender.messages.get(2).first()).isEqualTo("OCI ARM Monitor 恢复通知");
     assertThat(stateRepository.find("cpu_usage_percent").orElseThrow().active()).isFalse();
     assertThat(deliveryLogRepository.listRecent(20)).hasSize(2);
   }

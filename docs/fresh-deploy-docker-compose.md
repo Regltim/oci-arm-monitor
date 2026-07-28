@@ -92,7 +92,7 @@ MONITOR_CORS_ALLOWED_ORIGINS=https://monitor.example.com
 MONITOR_COOKIE_SECURE=true
 ```
 
-微信公众号通知可以在初始化脚本中配置，也可以部署后在“系统设置 → 通知设置”中维护。运行状态和费用流量使用两份独立 Template ID，每日摘要开启时会发送两条不带网页跳转的消息。脚本会自动生成 `MONITOR_SETTINGS_ENCRYPTION_KEY`，用于加密页面保存到 SQLite 的公众号凭据。详细步骤见[微信公众号通知配置](wechat-notifications.md)。
+微信公众号通知可以在初始化脚本中配置，也可以部署后在“系统设置 → 通知设置”中维护。运行状态和费用流量使用两份独立的四行模板；每日汇总开启后，运行信息会按实例和告警拆成多张消息，费用与流量使用一张消息，所有消息都不带网页跳转。脚本会自动生成 `MONITOR_SETTINGS_ENCRYPTION_KEY`，用于加密页面保存到 SQLite 的公众号凭据。详细步骤见[微信公众号通知配置](wechat-notifications.md)。
 
 重新运行脚本会备份旧 `.env`。已有域名、OCID 和密码不会在提示中明文回显。
 

@@ -21,6 +21,7 @@ public class WechatApiClient implements WechatTemplateSender {
 
   private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(10);
   private static final long TOKEN_REFRESH_MARGIN_SECONDS = 300;
+  private static final int MAX_TEMPLATE_FIELD_CODE_POINTS = 180;
 
   private final WechatNotificationProperties properties;
   private final ObjectMapper objectMapper;
@@ -127,12 +128,9 @@ public class WechatApiClient implements WechatTemplateSender {
   ) {
     Map<String, Object> data = new LinkedHashMap<>();
     data.put("first", value(message.first()));
-    data.put("level", value(message.level()));
-    data.put("metric", value(message.metric()));
-    data.put("status", value(message.status()));
-    data.put("content", value(message.content()));
-    data.put("time", value(message.time()));
-    data.put("remark", value(message.remark()));
+    data.put("item1", value(message.item1()));
+    data.put("item2", value(message.item2()));
+    data.put("item3", value(message.item3()));
 
     Map<String, Object> payload = new LinkedHashMap<>();
     payload.put("touser", openId);
@@ -142,7 +140,13 @@ public class WechatApiClient implements WechatTemplateSender {
   }
 
   private Map<String, String> value(String value) {
-    return Map.of("value", value == null ? "" : value);
+    String normalized = value == null
+      ? ""
+      : value.replaceAll("[\\p{Cntrl}\\r\\n\\t]+", " ").replaceAll("\\s+", " ").trim();
+    if (normalized.codePointCount(0, normalized.length()) > MAX_TEMPLATE_FIELD_CODE_POINTS) {
+      normalized = normalized.substring(0, normalized.offsetByCodePoints(0, MAX_TEMPLATE_FIELD_CODE_POINTS));
+    }
+    return Map.of("value", normalized);
   }
 
   private JsonNode sendJson(HttpRequest request) {

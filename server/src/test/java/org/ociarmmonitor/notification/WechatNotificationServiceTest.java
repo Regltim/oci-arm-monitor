@@ -69,13 +69,14 @@ class WechatNotificationServiceTest {
       );
     WechatTemplateMessage statusMessage = sender.deliveries.get(0).message();
     assertThat(statusMessage.first()).isEqualTo("OCI ARM Monitor 运行模板测试");
-    assertThat(statusMessage.metric()).isEqualTo("运行状态模板");
-    assertThat(statusMessage.time()).isEqualTo("2026-07-27 09:00:00");
-    assertThat(statusMessage.remark()).isEqualTo("本消息仅用于验证公众号运行状态模板");
+    assertThat(statusMessage.item1()).isEqualTo("模板：运行状态");
+    assertThat(statusMessage.item2()).isEqualTo("结果：测试成功");
+    assertThat(statusMessage.item3()).isEqualTo("时间：2026-07-27 09:00:00");
     WechatTemplateMessage costMessage = sender.deliveries.get(2).message();
     assertThat(costMessage.first()).isEqualTo("OCI ARM Monitor 费用与流量模板测试");
-    assertThat(costMessage.metric()).isEqualTo("费用与流量模板");
-    assertThat(costMessage.remark()).isEqualTo("本消息仅用于验证公众号费用与流量模板");
+    assertThat(costMessage.item1()).isEqualTo("模板：费用与流量");
+    assertThat(costMessage.item2()).isEqualTo("结果：测试成功");
+    assertThat(costMessage.item3()).isEqualTo("时间：2026-07-27 09:00:00");
   }
 
   @Test
@@ -110,11 +111,15 @@ class WechatNotificationServiceTest {
 
     service.sendAlert(alert);
     service.sendRecovery(alert);
-    service.sendDailyStatus(dailyReportData());
+    WechatDeliveryResult dailyStatus = service.sendDailyStatus(dailyReportData());
     service.sendDailyCostTraffic(dailyReportData());
 
+    assertThat(dailyStatus.successCount()).isEqualTo(4);
+    assertThat(dailyStatus.failureCount()).isZero();
     assertThat(sender.deliveries).extracting(SentTemplate::templateType)
       .containsExactly(
+        WechatTemplateType.STATUS,
+        WechatTemplateType.STATUS,
         WechatTemplateType.STATUS,
         WechatTemplateType.STATUS,
         WechatTemplateType.STATUS,
@@ -125,13 +130,25 @@ class WechatNotificationServiceTest {
         WechatTemplateType.COST_TRAFFIC
       );
     assertThat(sender.deliveries.get(0).message().first()).isEqualTo("OCI ARM Monitor 告警通知");
+    assertThat(sender.deliveries.get(0).message().item1()).isEqualTo("级别：警告｜指标：CPU 使用率");
+    assertThat(sender.deliveries.get(0).message().item2())
+      .isEqualTo("详情：CPU 使用率当前 95.00%，阈值 90.00%。");
+    assertThat(sender.deliveries.get(0).message().item3()).isEqualTo("时间：2026-07-27 09:00:00");
     assertThat(sender.deliveries.get(2).message().first()).isEqualTo("OCI ARM Monitor 恢复通知");
+    assertThat(sender.deliveries.get(2).message().item1()).isEqualTo("状态：已恢复｜指标：CPU 使用率");
+    assertThat(sender.deliveries.get(2).message().item2()).isEqualTo("说明：CPU 使用率已恢复至阈值范围内。");
+    assertThat(sender.deliveries.get(2).message().item3()).isEqualTo("时间：2026-07-27 09:00:00");
     assertThat(sender.deliveries.get(4).message().first()).isEqualTo("OCI ARM Monitor 每日运行状态");
-    assertThat(sender.deliveries.get(6).message().first()).isEqualTo("OCI ARM Monitor 费用与流量日报");
-    assertThat(sender.deliveries).allSatisfy(delivery -> {
-      assertThat(delivery.message().remark()).doesNotContain("点击");
-      assertThat(delivery.message().remark()).doesNotContain("监控面板");
-    });
+    assertThat(sender.deliveries.get(6).message().first()).isEqualTo("告警明细 1/1");
+    assertThat(sender.deliveries.get(8).message().first()).isEqualTo("OCI ARM Monitor 费用与流量");
+    assertThat(sender.deliveries).allSatisfy(delivery ->
+      assertThat(List.of(
+        delivery.message().first(),
+        delivery.message().item1(),
+        delivery.message().item2(),
+        delivery.message().item3()
+      )).allSatisfy(value -> assertThat(value).doesNotContain("点击").doesNotContain("监控面板"))
+    );
   }
 
   @Test

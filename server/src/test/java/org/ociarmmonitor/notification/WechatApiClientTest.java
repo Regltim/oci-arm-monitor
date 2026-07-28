@@ -67,13 +67,15 @@ class WechatApiClientTest {
     assertThat(payload.has("miniprogram")).isFalse();
     JsonNode costPayload = objectMapper.readTree(messageBodies.get(1));
     assertThat(costPayload.path("template_id").asText()).isEqualTo("template_example_cost");
-    assertThat(payload.path("data").path("first").path("value").asText()).isEqualTo("OCI ARM Monitor 测试通知");
-    assertThat(payload.path("data").path("level").path("value").asText()).isEqualTo("信息");
-    assertThat(payload.path("data").path("metric").path("value").asText()).isEqualTo("通知通道");
-    assertThat(payload.path("data").path("status").path("value").asText()).isEqualTo("测试成功");
-    assertThat(payload.path("data").path("content").path("value").asText()).isEqualTo("公众号模板消息配置有效。");
-    assertThat(payload.path("data").path("time").path("value").asText()).isEqualTo("2026-07-27 09:00:00");
-    assertThat(payload.path("data").path("remark").path("value").asText()).isEqualTo("本消息仅用于验证公众号模板");
+    JsonNode data = payload.path("data");
+    assertThat(data.properties()).extracting(java.util.Map.Entry::getKey)
+      .containsExactly("first", "item1", "item2", "item3");
+    assertThat(data.path("first").path("value").asText()).isEqualTo("OCI ARM Monitor 测试通知");
+    assertThat(data.path("item1").path("value").asText()).isEqualTo("信息");
+    assertThat(data.path("item2").path("value").asText()).isEqualTo("通知通道");
+    String item3 = data.path("item3").path("value").asText();
+    assertThat(item3).startsWith("测试成功 ").doesNotContain("\n");
+    assertThat(item3.codePointCount(0, item3.length())).isEqualTo(180);
   }
 
   @Test
@@ -213,10 +215,7 @@ class WechatApiClientTest {
       "OCI ARM Monitor 测试通知",
       "信息",
       "通知通道",
-      "测试成功",
-      "公众号模板消息配置有效。",
-      "2026-07-27 09:00:00",
-      "本消息仅用于验证公众号模板"
+      "测试成功\n" + "详".repeat(200)
     );
   }
 

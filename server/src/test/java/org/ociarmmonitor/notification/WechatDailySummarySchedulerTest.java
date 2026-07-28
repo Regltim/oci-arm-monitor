@@ -80,7 +80,7 @@ class WechatDailySummarySchedulerTest {
         WechatTemplateType.COST_TRAFFIC
       );
     assertThat(sender.deliveries.get(0).message().first()).isEqualTo("OCI ARM Monitor 每日运行状态");
-    assertThat(sender.deliveries.get(2).message().first()).isEqualTo("OCI ARM Monitor 费用与流量日报");
+    assertThat(sender.deliveries.get(2).message().first()).isEqualTo("OCI ARM Monitor 费用与流量");
     assertThat(claimedTypes()).containsExactlyInAnyOrder("STATUS", "COST_TRAFFIC");
     assertThat(deliveryLogRepository.listRecent(20)).extracting(WechatDeliveryResult::notificationType)
       .containsExactly("DAILY_COST_TRAFFIC", "DAILY_STATUS");
@@ -126,7 +126,7 @@ class WechatDailySummarySchedulerTest {
     scheduler.checkDueSummary();
 
     assertThat(sender.deliveries).hasSize(4);
-    assertThat(sender.deliveries.get(0).message().content()).contains("暂无主机采样数据");
+    assertThat(sender.deliveries.get(0).message().item2()).contains("暂无采样数据");
     assertThat(sender.deliveries.get(2).templateType()).isEqualTo(WechatTemplateType.COST_TRAFFIC);
     assertThat(deliveryLogRepository.listRecent(20)).extracting(WechatDeliveryResult::notificationType)
       .containsExactly("DAILY_COST_TRAFFIC", "DAILY_STATUS");

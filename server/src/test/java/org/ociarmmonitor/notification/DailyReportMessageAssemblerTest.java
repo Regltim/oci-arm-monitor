@@ -21,7 +21,7 @@ class DailyReportMessageAssemblerTest {
   private final DailyReportMessageAssembler assembler = new DailyReportMessageAssembler();
 
   @Test
-  void formatsDetailedStatusAndCostTrafficMessagesWithoutWebsiteHints() {
+  void formatsStatusAsSummaryInstanceAndAlertCardsWithoutWebsiteHints() {
     DailyReportContext context = context();
     DailyReportData data = new DailyReportData(
       context,
@@ -45,34 +45,42 @@ class DailyReportMessageAssemblerTest {
       new TrafficSummary(123.45, 67.89, 10_000, 0.6789, List.of())
     );
 
-    WechatTemplateMessage status = assembler.statusMessage(data);
+    List<WechatTemplateMessage> statusMessages = assembler.statusMessages(data);
     WechatTemplateMessage costTraffic = assembler.costTrafficMessage(data);
 
-    assertThat(status.first()).isEqualTo("OCI ARM Monitor 每日运行状态");
-    assertThat(status.level()).isEqualTo("警告");
-    assertThat(status.status()).isEqualTo("2 台实例，1 项活动告警");
-    assertThat(status.content())
-      .contains("实例汇总：运行 1 台，停止 1 台，其他 0 台")
-      .contains("arm-app-01：运行中，CPU 12.30%，内存 41.20%")
-      .contains("监控主机：CPU 18.20%，内存 62.50%，磁盘 71.30%")
-      .contains("活动告警：磁盘使用率")
-      .contains("OCI 同步：失败，2026-07-27 08:41:00")
-      .contains("最近成功：2026-07-27 08:02:16");
-    assertThat(status.remark()).doesNotContain("点击").doesNotContain("http");
+    assertThat(statusMessages).hasSize(3);
+    WechatTemplateMessage summary = statusMessages.get(0);
+    assertThat(summary.first()).isEqualTo("OCI ARM Monitor 每日运行状态");
+    assertThat(summary.item1()).isEqualTo("实例：共 2 台｜运行 1｜停止 1｜其他 0");
+    assertThat(summary.item2()).isEqualTo("主机：CPU 18.20%｜内存 62.50%｜磁盘 71.30%");
+    assertThat(summary.item3())
+      .contains("告警：1 项")
+      .contains("同步：失败 2026-07-27 08:41:00")
+      .contains("最近成功 2026-07-27 08:02:16");
 
-    assertThat(costTraffic.first()).isEqualTo("OCI ARM Monitor 费用与流量日报");
-    assertThat(costTraffic.content())
-      .contains("OCI 费用：¥12.34")
-      .contains("手工费用：¥8.00")
-      .contains("本月总费用：¥20.34")
-      .contains("月底费用预测：¥28.62")
-      .contains("入站流量：123.45 GB")
-      .contains("出站流量：67.89 GB")
-      .contains("出站免费额度：10,000.00 GB")
-      .contains("额度使用率：0.68%")
-      .contains("剩余额度：9,932.11 GB")
-      .contains("数据同步：2026-07-27 08:02:16");
-    assertThat(costTraffic.remark()).doesNotContain("点击").doesNotContain("http");
+    WechatTemplateMessage instances = statusMessages.get(1);
+    assertThat(instances.first()).isEqualTo("实例明细 1/1");
+    assertThat(instances.item1()).isEqualTo("1. arm-app-01：运行中｜CPU 12.30%｜内存 41.20%");
+    assertThat(instances.item2()).isEqualTo("2. arm-backup：已停止");
+    assertThat(instances.item3()).isBlank();
+
+    WechatTemplateMessage alerts = statusMessages.get(2);
+    assertThat(alerts.first()).isEqualTo("告警明细 1/1");
+    assertThat(alerts.item1())
+      .isEqualTo("1. [警告] 磁盘使用率｜磁盘使用率当前 91.00%，阈值 80.00%。");
+    assertThat(alerts.item2()).isBlank();
+    assertThat(alerts.item3()).isBlank();
+    assertThat(statusMessages).allSatisfy(message -> visibleValues(message).forEach(value ->
+      assertThat(value).doesNotContain("点击").doesNotContain("http").doesNotContain("\n")
+    ));
+
+    assertThat(costTraffic.first()).isEqualTo("OCI ARM Monitor 费用与流量");
+    assertThat(costTraffic.item1())
+      .isEqualTo("费用：OCI ¥12.34｜手工 ¥8.00｜总计 ¥20.34｜预测 ¥28.62");
+    assertThat(costTraffic.item2())
+      .isEqualTo("流量：入站 123.45 GB｜出站 67.89 GB｜额度 10,000.00 GB");
+    assertThat(costTraffic.item3())
+      .isEqualTo("额度：已用 0.68%｜剩余 9,932.11 GB｜同步 2026-07-27 08:02:16");
   }
 
   @Test
@@ -88,21 +96,18 @@ class DailyReportMessageAssemblerTest {
       new TrafficSummary(0, 0, 0, 0, List.of())
     );
 
-    WechatTemplateMessage status = assembler.statusMessage(data);
+    List<WechatTemplateMessage> statusMessages = assembler.statusMessages(data);
     WechatTemplateMessage costTraffic = assembler.costTrafficMessage(data);
 
-    assertThat(status.content())
-      .contains("暂无 OCI 实例数据")
-      .contains("暂无主机采样数据")
-      .contains("活动告警：无")
-      .contains("OCI 同步：暂无记录");
-    assertThat(costTraffic.content())
-      .contains("OCI 费用：暂无同步数据")
-      .contains("手工费用：¥8.00")
-      .contains("本月总费用：无法计算")
-      .contains("入站流量：暂无同步数据")
-      .contains("出站免费额度：未配置")
-      .doesNotContain("额度使用率：0.00%");
+    assertThat(statusMessages).hasSize(1);
+    assertThat(statusMessages.get(0).item1()).isEqualTo("实例：暂无 OCI 实例数据");
+    assertThat(statusMessages.get(0).item2()).isEqualTo("主机：暂无采样数据");
+    assertThat(statusMessages.get(0).item3()).isEqualTo("告警：无｜同步：暂无记录");
+    assertThat(costTraffic.item1())
+      .isEqualTo("费用：OCI 暂无同步数据｜手工 ¥8.00｜总计 无法计算｜预测 无法计算");
+    assertThat(costTraffic.item2())
+      .isEqualTo("流量：入站 暂无同步数据｜出站 暂无同步数据｜额度 未配置");
+    assertThat(costTraffic.item3()).isEqualTo("额度：无法计算｜同步 暂无成功记录");
   }
 
   @Test
@@ -127,11 +132,59 @@ class DailyReportMessageAssemblerTest {
       new TrafficSummary(0, 0, 10_000, 0, List.of())
     );
 
-    String content = assembler.statusMessage(data).content();
+    List<WechatTemplateMessage> messages = assembler.statusMessages(data);
+    List<String> visibleValues = messages.stream().flatMap(message -> visibleValues(message).stream()).toList();
 
-    assertThat(content.codePointCount(0, content.length())).isLessThanOrEqualTo(1800);
-    assertThat(content).contains("另有 20 台实例未展开");
-    assertThat(content).doesNotContain("instance-0\n恶意换行");
+    assertThat(messages).hasSize(5);
+    assertThat(messages.get(1).first()).isEqualTo("实例明细 1/4");
+    assertThat(messages.get(4).first()).isEqualTo("实例明细 4/4");
+    assertThat(messages.get(4).item2()).isEqualTo("另有 20 台实例未展示");
+    assertThat(visibleValues).allSatisfy(value -> {
+      assertThat(value.codePointCount(0, value.length())).isLessThanOrEqualTo(180);
+      assertThat(value).doesNotContain("\n");
+    });
+    assertThat(String.join("|", visibleValues))
+      .contains("instance-0 恶意换行")
+      .doesNotContain("instance-10：");
+  }
+
+  @Test
+  void limitsAlertDetailsToFiveAndSplitsEveryThreeItems() {
+    List<ServerAlert> alerts = new ArrayList<>();
+    for (int index = 1; index <= 7; index++) {
+      alerts.add(new ServerAlert(
+        "metric_" + index,
+        index == 1 ? "danger" : "warning",
+        "告警 " + index,
+        "第 " + index + " 项\n告警详情",
+        index,
+        1,
+        "%"
+      ));
+    }
+    DailyReportData data = new DailyReportData(
+      context(),
+      List.of(),
+      null,
+      alerts,
+      null,
+      null,
+      new CostSummary(0, 0, 0, 0, "CNY", List.of(), List.of()),
+      new TrafficSummary(0, 0, 0, 0, List.of())
+    );
+
+    List<WechatTemplateMessage> messages = assembler.statusMessages(data);
+
+    assertThat(messages).hasSize(3);
+    assertThat(messages.get(1).first()).isEqualTo("告警明细 1/2");
+    assertThat(messages.get(1).item1()).isEqualTo("1. [严重] 告警 1｜第 1 项 告警详情");
+    assertThat(messages.get(2).first()).isEqualTo("告警明细 2/2");
+    assertThat(messages.get(2).item3()).isEqualTo("另有 2 项告警未展示");
+    assertThat(String.join("|", visibleValues(messages.get(2)))).doesNotContain("告警 6");
+  }
+
+  private List<String> visibleValues(WechatTemplateMessage message) {
+    return List.of(message.first(), message.item1(), message.item2(), message.item3());
   }
 
   private DailyReportContext context() {

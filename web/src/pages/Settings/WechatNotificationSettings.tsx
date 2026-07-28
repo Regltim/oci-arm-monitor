@@ -185,6 +185,12 @@ export default function WechatNotificationSettings() {
           description={status.dailySummaryMissingReason}
         />
       ) : null}
+      <Alert
+        type="info"
+        showIcon
+        message="请使用四行模板"
+        description="两个公众号模板都必须依次使用 first、item1、item2、item3 四个字段。旧七字段模板需要在公众号后台重建并替换 Template ID；运行汇总会按实例和告警拆成多张消息，费用与流量使用一张消息。"
+      />
       <Card loading={settingsRequest.loading} title="公众号配置">
         <Space direction="vertical" size={16} style={{ width: '100%' }}>
           <Descriptions bordered size="small" column={1}>
@@ -198,7 +204,7 @@ export default function WechatNotificationSettings() {
               {status?.costTemplateIdMasked || '未设置'}
             </Descriptions.Item>
             <Descriptions.Item label="接收人数">{status?.recipientCount ?? 0}</Descriptions.Item>
-            <Descriptions.Item label="每日双模板摘要">
+            <Descriptions.Item label="每日汇总推送">
               <Tag color={status?.dailySummaryConfigured ? 'green' : 'default'}>
                 {status?.dailySummaryConfigured ? '配置完整' : '未就绪'}
               </Tag>
@@ -252,7 +258,7 @@ export default function WechatNotificationSettings() {
               <Form.Item label="告警状态变化时立即推送" name="immediatePushEnabled" valuePropName="checked">
                 <Switch />
               </Form.Item>
-              <Form.Item label="每日双模板摘要" name="dailySummaryEnabled" valuePropName="checked">
+              <Form.Item label="每日汇总推送" name="dailySummaryEnabled" valuePropName="checked">
                 <Switch />
               </Form.Item>
               <Form.Item
