@@ -13,6 +13,7 @@ import org.springframework.stereotype.Service;
 public class WechatNotificationService {
 
   private static final DateTimeFormatter MESSAGE_TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+  private static final int MAX_FAILURE_REASON_LENGTH = 180;
 
   private final WechatNotificationSettingsRepository settingsRepository;
   private final WechatTemplateSender templateSender;
@@ -164,6 +165,7 @@ public class WechatNotificationService {
   ) {
     int successCount = 0;
     int failureCount = 0;
+    String failureReason = "";
     for (WechatTemplateMessage message : messages) {
       for (String openId : settings.openIds()) {
         try {
@@ -171,17 +173,49 @@ public class WechatNotificationService {
           successCount++;
         } catch (RuntimeException exception) {
           failureCount++;
+          if (failureReason.isBlank()) {
+            failureReason = sanitizedFailureReason(exception, settings);
+          }
         }
       }
+    }
+    String resultMessage = "发送完成：成功 " + successCount + "，失败 " + failureCount;
+    if (!failureReason.isBlank()) {
+      resultMessage += "；失败原因：" + failureReason;
     }
     return new WechatDeliveryResult(
       notificationType,
       metricName,
       successCount,
       failureCount,
-      "发送完成：成功 " + successCount + "，失败 " + failureCount,
+      resultMessage,
       Instant.now(clock).toString()
     );
+  }
+
+  private String sanitizedFailureReason(
+    RuntimeException exception,
+    WechatNotificationSettings settings
+  ) {
+    if (!(exception instanceof WechatApiException) || exception.getMessage() == null) {
+      return "微信公众号接口调用异常";
+    }
+    String reason = exception.getMessage().replaceAll("[\\p{Cntrl}\\r\\n\\t]+", " ").trim();
+    reason = redact(reason, settings.appId());
+    reason = redact(reason, settings.appSecret());
+    reason = redact(reason, settings.templateId());
+    reason = redact(reason, settings.costTemplateId());
+    for (String openId : settings.openIds()) {
+      reason = redact(reason, openId);
+    }
+    if (reason.length() > MAX_FAILURE_REASON_LENGTH) {
+      reason = reason.substring(0, MAX_FAILURE_REASON_LENGTH);
+    }
+    return reason;
+  }
+
+  private String redact(String value, String secret) {
+    return secret == null || secret.isBlank() ? value : value.replace(secret, "[REDACTED]");
   }
 
   private WechatNotificationSettings requireAvailableSettings() {

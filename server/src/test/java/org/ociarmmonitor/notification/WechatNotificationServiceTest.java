@@ -167,6 +167,22 @@ class WechatNotificationServiceTest {
     assertThat(result.message()).doesNotContain("openid_example_2");
   }
 
+  @Test
+  void reportsSanitizedWechatFailureReason() {
+    sender.failureMessage = "微信运行状态模板需要正好 4 个不同的数据字段，当前识别到 2 个 "
+      + "wx_example_secret template_example_status openid_example_1";
+
+    WechatTestDeliveryResult result = service.sendTest();
+
+    assertThat(result.status().successCount()).isZero();
+    assertThat(result.status().failureCount()).isEqualTo(2);
+    assertThat(result.status().message())
+      .contains("失败原因：微信运行状态模板需要正好 4 个不同的数据字段，当前识别到 2 个")
+      .doesNotContain("wx_example_secret")
+      .doesNotContain("template_example_status")
+      .doesNotContain("openid_example_1");
+  }
+
   private WechatNotificationService createService(WechatNotificationProperties properties) {
     WechatNotificationSettingsRepository settingsRepository = new WechatNotificationSettingsRepository(
       jdbcTemplate,
@@ -272,6 +288,7 @@ class WechatNotificationServiceTest {
 
     private final List<SentTemplate> deliveries = new ArrayList<>();
     private String failingOpenId = "";
+    private String failureMessage = "";
 
     @Override
     public void sendTemplate(
@@ -281,6 +298,9 @@ class WechatNotificationServiceTest {
       WechatTemplateMessage message
     ) {
       deliveries.add(new SentTemplate(openId, templateType, message));
+      if (!failureMessage.isBlank()) {
+        throw new WechatApiException(failureMessage);
+      }
       if (openId.equals(failingOpenId)) {
         throw new WechatApiException("模拟发送失败");
       }

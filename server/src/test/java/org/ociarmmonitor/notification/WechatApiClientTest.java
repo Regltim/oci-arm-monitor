@@ -23,6 +23,7 @@ class WechatApiClientTest {
 
   private final ObjectMapper objectMapper = new ObjectMapper();
   private final AtomicInteger tokenRequests = new AtomicInteger();
+  private final AtomicInteger templateRequests = new AtomicInteger();
   private final AtomicInteger messageRequests = new AtomicInteger();
   private final List<String> messageBodies = new CopyOnWriteArrayList<>();
   private HttpServer server;
@@ -52,6 +53,7 @@ class WechatApiClientTest {
       messageBodies.add(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
       respond(exchange, 200, "{\"errcode\":0,\"errmsg\":\"ok\",\"msgid\":123}");
     });
+    registerTemplateList(defaultTemplateList());
     server.start();
     WechatApiClient client = client();
 
@@ -79,6 +81,84 @@ class WechatApiClientTest {
   }
 
   @Test
+  void usesFieldNamesFromWechatTemplateContentInsteadOfHardcodedKeys() throws Exception {
+    server.createContext("/cgi-bin/token", exchange ->
+      respond(exchange, 200, "{\"access_token\":\"access-token-1\",\"expires_in\":7200}"));
+    registerTemplateList("""
+      {
+        "template_list": [
+          {
+            "template_id": "template_example_status",
+            "title": "OCI ARM Monitor 运行通知",
+            "primary_industry": "IT科技",
+            "deputy_industry": "互联网",
+            "content": "{{headline.DATA}}\\n{{summary.DATA}}\\n{{details.DATA}}\\n{{sentAt.DATA}}",
+            "example": ""
+          },
+          {
+            "template_id": "template_example_cost",
+            "title": "OCI ARM Monitor 费用与流量",
+            "primary_industry": "IT科技",
+            "deputy_industry": "互联网",
+            "content": "{{costTitle.DATA}}\\n{{cost.DATA}}\\n{{traffic.DATA}}\\n{{quota.DATA}}",
+            "example": ""
+          }
+        ]
+      }
+      """);
+    server.createContext("/cgi-bin/message/template/send", exchange -> {
+      messageBodies.add(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+      respond(exchange, 200, "{\"errcode\":0,\"errmsg\":\"ok\"}");
+    });
+    server.start();
+
+    client().sendTemplate(settings(), "openid_example_1", WechatTemplateType.STATUS, message());
+
+    assertThat(templateRequests).hasValue(1);
+    JsonNode data = objectMapper.readTree(messageBodies.get(0)).path("data");
+    assertThat(data.properties()).extracting(java.util.Map.Entry::getKey)
+      .containsExactly("headline", "summary", "details", "sentAt");
+    assertThat(data.path("headline").path("value").asText()).isEqualTo("OCI ARM Monitor 测试通知");
+    assertThat(data.path("summary").path("value").asText()).isEqualTo("信息");
+    assertThat(data.path("details").path("value").asText()).isEqualTo("通知通道");
+  }
+
+  @Test
+  void rejectsTemplateWithoutFourUniqueDataFieldsBeforeSending() throws Exception {
+    server.createContext("/cgi-bin/token", exchange ->
+      respond(exchange, 200, "{\"access_token\":\"access-token-1\",\"expires_in\":7200}"));
+    registerTemplateList("""
+      {
+        "template_list": [
+          {
+            "template_id": "template_example_status",
+            "title": "字段不足的模板",
+            "primary_industry": "IT科技",
+            "deputy_industry": "互联网",
+            "content": "{{first.DATA}}\\n{{details.DATA}}",
+            "example": ""
+          }
+        ]
+      }
+      """);
+    server.createContext("/cgi-bin/message/template/send", exchange -> {
+      messageRequests.incrementAndGet();
+      respond(exchange, 200, "{\"errcode\":0,\"errmsg\":\"ok\"}");
+    });
+    server.start();
+
+    assertThatThrownBy(() -> client().sendTemplate(
+      settings(),
+      "openid_example_1",
+      WechatTemplateType.STATUS,
+      message()
+    ))
+      .isInstanceOf(WechatApiException.class)
+      .hasMessage("微信运行状态模板需要正好 4 个不同的数据字段，当前识别到 2 个");
+    assertThat(messageRequests).hasValue(0);
+  }
+
+  @Test
   void refreshesAccessTokenWhenAppIdChanges() throws Exception {
     server.createContext("/cgi-bin/token", exchange -> {
       int requestNumber = tokenRequests.incrementAndGet();
@@ -86,6 +166,7 @@ class WechatApiClientTest {
     });
     server.createContext("/cgi-bin/message/template/send", exchange ->
       respond(exchange, 200, "{\"errcode\":0,\"errmsg\":\"ok\"}"));
+    registerTemplateList(defaultTemplateList());
     server.start();
     WechatApiClient client = client();
 
@@ -93,6 +174,7 @@ class WechatApiClientTest {
     client.sendTemplate(settings("wx_another_app_id"), "openid_example_2", WechatTemplateType.STATUS, message());
 
     assertThat(tokenRequests).hasValue(2);
+    assertThat(templateRequests).hasValue(2);
   }
 
   @Test
@@ -109,6 +191,7 @@ class WechatApiClientTest {
         respond(exchange, 200, "{\"errcode\":0,\"errmsg\":\"ok\"}");
       }
     });
+    registerTemplateList(defaultTemplateList());
     server.start();
 
     client().sendTemplate(settings(), "openid_example_1", WechatTemplateType.STATUS, message());
@@ -123,6 +206,7 @@ class WechatApiClientTest {
       respond(exchange, 200, "{\"access_token\":\"access-token-1\",\"expires_in\":7200}"));
     server.createContext("/cgi-bin/message/template/send", exchange ->
       respond(exchange, 200, "{\"errcode\":40003,\"errmsg\":\"invalid template_example_status template_example_cost openid_example_1\"}"));
+    registerTemplateList(defaultTemplateList());
     server.start();
 
     assertThatThrownBy(() -> client().sendTemplate(
@@ -217,6 +301,38 @@ class WechatApiClientTest {
       "通知通道",
       "测试成功\n" + "详".repeat(200)
     );
+  }
+
+  private void registerTemplateList(String responseBody) {
+    server.createContext("/cgi-bin/template/get_all_private_template", exchange -> {
+      templateRequests.incrementAndGet();
+      respond(exchange, 200, responseBody);
+    });
+  }
+
+  private String defaultTemplateList() {
+    return """
+      {
+        "template_list": [
+          {
+            "template_id": "template_example_status",
+            "title": "OCI ARM Monitor 运行通知",
+            "primary_industry": "IT科技",
+            "deputy_industry": "互联网",
+            "content": "{{first.DATA}}\\n{{item1.DATA}}\\n{{item2.DATA}}\\n{{item3.DATA}}",
+            "example": ""
+          },
+          {
+            "template_id": "template_example_cost",
+            "title": "OCI ARM Monitor 费用与流量",
+            "primary_industry": "IT科技",
+            "deputy_industry": "互联网",
+            "content": "{{first.DATA}}\\n{{item1.DATA}}\\n{{item2.DATA}}\\n{{item3.DATA}}",
+            "example": ""
+          }
+        ]
+      }
+      """;
   }
 
   private void respond(HttpExchange exchange, int status, String body) throws IOException {

@@ -25,6 +25,7 @@ import {
   Switch,
   Table,
   Tag,
+  Typography,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { useState } from 'react';
@@ -68,10 +69,15 @@ function TestDeliveryOutcome({ label, result }: TestDeliveryOutcomeProps) {
       : 'red';
 
   return (
-    <Space size={8} wrap>
-      <span>{label}</span>
-      <Tag color={color}>{statusText}</Tag>
-      <span>成功 {result.successCount}，失败 {result.failureCount}</span>
+    <Space direction="vertical" size={2}>
+      <Space size={8} wrap>
+        <span>{label}</span>
+        <Tag color={color}>{statusText}</Tag>
+        <span>成功 {result.successCount}，失败 {result.failureCount}</span>
+      </Space>
+      {result.failureCount > 0 ? (
+        <Typography.Text type="secondary">{result.message}</Typography.Text>
+      ) : null}
     </Space>
   );
 }
@@ -188,8 +194,8 @@ export default function WechatNotificationSettings() {
       <Alert
         type="info"
         showIcon
-        message="请使用四行模板"
-        description="两个公众号模板都必须依次使用 first、item1、item2、item3 四个字段。旧七字段模板需要在公众号后台重建并替换 Template ID；运行汇总会按实例和告警拆成多张消息，费用与流量使用一张消息。"
+        message="请使用四字段模板"
+        description="两个公众号模板都必须正好包含四个不同字段，系统会按 Template ID 自动识别字段名和顺序。旧七字段模板需要在公众号后台重建并替换；运行汇总会按实例和告警拆成多张消息，费用与流量使用一张消息。"
       />
       <Card loading={settingsRequest.loading} title="公众号配置">
         <Space direction="vertical" size={16} style={{ width: '100%' }}>

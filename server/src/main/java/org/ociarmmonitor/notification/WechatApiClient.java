@@ -12,21 +12,34 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import org.springframework.stereotype.Component;
 
 @Component
 public class WechatApiClient implements WechatTemplateSender {
 
   private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(10);
+  private static final Duration TEMPLATE_CACHE_TTL = Duration.ofMinutes(10);
   private static final long TOKEN_REFRESH_MARGIN_SECONDS = 300;
   private static final int MAX_TEMPLATE_FIELD_CODE_POINTS = 180;
+  private static final int REQUIRED_TEMPLATE_FIELD_COUNT = 4;
+  private static final Pattern TEMPLATE_FIELD_PATTERN = Pattern.compile(
+    "\\{\\{\\s*([A-Za-z][A-Za-z0-9_]*)\\.DATA\\s*}}"
+  );
 
   private final WechatNotificationProperties properties;
   private final ObjectMapper objectMapper;
   private final HttpClient httpClient;
   private volatile CachedToken cachedToken;
+  private volatile CachedTemplates cachedTemplates;
 
   public WechatApiClient(WechatNotificationProperties properties, ObjectMapper objectMapper) {
     this.properties = properties;
@@ -98,9 +111,18 @@ public class WechatApiClient implements WechatTemplateSender {
     WechatTemplateMessage message,
     String accessToken
   ) {
+    String configuredTemplateId = templateId(settings, templateType);
+    List<String> fieldNames = templateFields(
+      settings,
+      templateType,
+      configuredTemplateId,
+      accessToken
+    );
     String requestBody;
     try {
-      requestBody = objectMapper.writeValueAsString(templatePayload(settings, openId, templateType, message));
+      requestBody = objectMapper.writeValueAsString(
+        templatePayload(openId, configuredTemplateId, fieldNames, message)
+      );
     } catch (JsonProcessingException exception) {
       throw new WechatApiException("微信公众号模板消息生成失败", exception);
     }
@@ -121,22 +143,110 @@ public class WechatApiClient implements WechatTemplateSender {
   }
 
   private Map<String, Object> templatePayload(
-    WechatNotificationSettings settings,
     String openId,
-    WechatTemplateType templateType,
+    String configuredTemplateId,
+    List<String> fieldNames,
     WechatTemplateMessage message
   ) {
     Map<String, Object> data = new LinkedHashMap<>();
-    data.put("first", value(message.first()));
-    data.put("item1", value(message.item1()));
-    data.put("item2", value(message.item2()));
-    data.put("item3", value(message.item3()));
+    List<String> values = new ArrayList<>(REQUIRED_TEMPLATE_FIELD_COUNT);
+    values.add(message.first());
+    values.add(message.item1());
+    values.add(message.item2());
+    values.add(message.item3());
+    for (int index = 0; index < REQUIRED_TEMPLATE_FIELD_COUNT; index++) {
+      data.put(fieldNames.get(index), value(values.get(index)));
+    }
 
     Map<String, Object> payload = new LinkedHashMap<>();
     payload.put("touser", openId);
-    payload.put("template_id", templateId(settings, templateType));
+    payload.put("template_id", configuredTemplateId);
     payload.put("data", data);
     return payload;
+  }
+
+  private synchronized List<String> templateFields(
+    WechatNotificationSettings settings,
+    WechatTemplateType templateType,
+    String configuredTemplateId,
+    String accessToken
+  ) {
+    Instant now = Instant.now();
+    if (cachedTemplates != null
+      && cachedTemplates.appId().equals(settings.appId())
+      && cachedTemplates.expiresAt().isAfter(now)
+      && cachedTemplates.fieldsByTemplateId().containsKey(configuredTemplateId)) {
+      return requireFourFields(templateType, cachedTemplates.fieldsByTemplateId().get(configuredTemplateId));
+    }
+
+    JsonNode response = sendJson(
+      HttpRequest.newBuilder(endpoint(
+          "/cgi-bin/template/get_all_private_template?access_token=" + encode(accessToken)
+        ))
+        .timeout(REQUEST_TIMEOUT)
+        .GET()
+        .build()
+    );
+    int errorCode = response.path("errcode").asInt(0);
+    if (errorCode != 0) {
+      throw new WechatApiException(
+        "微信模板列表获取失败，错误码 "
+          + errorCode
+          + formatWechatMessage(response, settings, ""),
+        errorCode
+      );
+    }
+
+    JsonNode templateList = response.path("template_list");
+    if (!templateList.isArray()) {
+      throw new WechatApiException("微信模板列表响应缺少 template_list");
+    }
+    Map<String, List<String>> fieldsByTemplateId = new LinkedHashMap<>();
+    for (JsonNode template : templateList) {
+      String templateId = template.path("template_id").asText("").trim();
+      if (!templateId.isBlank()) {
+        fieldsByTemplateId.put(templateId, extractTemplateFields(template.path("content").asText("")));
+      }
+    }
+    Map<String, List<String>> immutableFields = Collections.unmodifiableMap(fieldsByTemplateId);
+    cachedTemplates = new CachedTemplates(settings.appId(), immutableFields, now.plus(TEMPLATE_CACHE_TTL));
+
+    List<String> fieldNames = immutableFields.get(configuredTemplateId);
+    if (fieldNames == null) {
+      throw new WechatApiException(
+        "微信后台未找到已配置的" + templateTypeLabel(templateType) + "模板，请确认 Template ID 属于当前公众号"
+      );
+    }
+    return requireFourFields(templateType, fieldNames);
+  }
+
+  private List<String> extractTemplateFields(String content) {
+    Set<String> fieldNames = new LinkedHashSet<>();
+    Matcher matcher = TEMPLATE_FIELD_PATTERN.matcher(content == null ? "" : content);
+    while (matcher.find()) {
+      fieldNames.add(matcher.group(1));
+    }
+    return List.copyOf(fieldNames);
+  }
+
+  private List<String> requireFourFields(WechatTemplateType templateType, List<String> fieldNames) {
+    if (fieldNames.size() != REQUIRED_TEMPLATE_FIELD_COUNT) {
+      throw new WechatApiException(
+        "微信"
+          + templateTypeLabel(templateType)
+          + "模板需要正好 4 个不同的数据字段，当前识别到 "
+          + fieldNames.size()
+          + " 个"
+      );
+    }
+    return fieldNames;
+  }
+
+  private String templateTypeLabel(WechatTemplateType templateType) {
+    return switch (templateType) {
+      case STATUS -> "运行状态";
+      case COST_TRAFFIC -> "费用与流量";
+    };
   }
 
   private Map<String, String> value(String value) {
@@ -220,5 +330,12 @@ public class WechatApiClient implements WechatTemplateSender {
   }
 
   private record CachedToken(String appId, String value, Instant expiresAt) {
+  }
+
+  private record CachedTemplates(
+    String appId,
+    Map<String, List<String>> fieldsByTemplateId,
+    Instant expiresAt
+  ) {
   }
 }
