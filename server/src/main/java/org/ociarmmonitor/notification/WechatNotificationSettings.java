@@ -17,7 +17,9 @@ public record WechatNotificationSettings(
   LocalTime dailySummaryTime,
   ZoneId zoneId,
   String source,
-  String updatedAt
+  String updatedAt,
+  boolean detailPageEnabled,
+  int detailPageTokenTtlDays
 ) {
 
   public boolean configured() {
@@ -58,7 +60,43 @@ public record WechatNotificationSettings(
       dailySummaryTime,
       zoneId,
       source,
-      updatedAt
+      updatedAt,
+      false,
+      1
+    );
+  }
+
+  public WechatNotificationSettings(
+    boolean enabled,
+    String appId,
+    String appSecret,
+    String templateId,
+    String costTemplateId,
+    List<String> openIds,
+    String publicUrl,
+    boolean immediatePushEnabled,
+    boolean dailySummaryEnabled,
+    LocalTime dailySummaryTime,
+    ZoneId zoneId,
+    String source,
+    String updatedAt
+  ) {
+    this(
+      enabled,
+      appId,
+      appSecret,
+      templateId,
+      costTemplateId,
+      openIds,
+      publicUrl,
+      immediatePushEnabled,
+      dailySummaryEnabled,
+      dailySummaryTime,
+      zoneId,
+      source,
+      updatedAt,
+      false,
+      1
     );
   }
 }

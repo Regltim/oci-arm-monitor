@@ -14,6 +14,7 @@ export default defineConfig({
   request: {},
   routes: [
     { path: '/login', component: './Login', layout: false },
+    { path: '/r/:snapshotId', component: './PublicReport', layout: false },
     { path: '/', redirect: '/dashboard' },
     { name: '总览看板', path: '/dashboard', component: './Dashboard', wrappers: ['@/wrappers/auth'] },
     { name: '实例监控', path: '/instances', component: './Instances', wrappers: ['@/wrappers/auth'] },

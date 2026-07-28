@@ -39,16 +39,30 @@ public class RequestLoggingFilter extends OncePerRequestFilter {
       filterChain.doFilter(request, response);
     } finally {
       long durationMillis = System.currentTimeMillis() - startTime;
-      LOGGER.info(
-        "HTTP {} {} status={} durationMs={} clientIp={}",
-        request.getMethod(),
-        request.getRequestURI(),
-        response.getStatus(),
-        durationMillis,
-        clientIp(request)
-      );
+      if (isPublicReportRequest(request)) {
+        LOGGER.info(
+          "HTTP {} {} status={} durationMs={}",
+          request.getMethod(),
+          request.getRequestURI(),
+          response.getStatus(),
+          durationMillis
+        );
+      } else {
+        LOGGER.info(
+          "HTTP {} {} status={} durationMs={} clientIp={}",
+          request.getMethod(),
+          request.getRequestURI(),
+          response.getStatus(),
+          durationMillis,
+          clientIp(request)
+        );
+      }
       MDC.remove(MDC_REQUEST_ID);
     }
+  }
+
+  private boolean isPublicReportRequest(HttpServletRequest request) {
+    return request.getRequestURI().startsWith(request.getContextPath() + "/public/reports/");
   }
 
   private String resolveRequestId(HttpServletRequest request) {

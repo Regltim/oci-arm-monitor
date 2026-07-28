@@ -359,11 +359,11 @@ test_wechat_notifications_collects_immediate_and_daily_policy() {
   cp "${ROOT_DIR}/scripts/init-deploy.sh" "${tmp_dir}/scripts/init-deploy.sh"
 
   output="$(
-    printf 'y\nwx_example_app\nexample-secret\ntemplate_example_status\ntemplate_example_cost\nopenid_example_1,openid_example_2\n\ny\n21:30\n\n' | \
-      INIT_DEPLOY_LIB_ONLY=true bash -c '
+    printf 'y\nwx_example_app\nexample-secret\ntemplate_example_status\ntemplate_example_cost\nopenid_example_1,openid_example_2\n\ny\n21:30\n\n\n\n' | \
+      MONITOR_PUBLIC_URL=https://monitor.example.com INIT_DEPLOY_LIB_ONLY=true bash -c '
         source "$1"
         collect_wechat_settings
-        printf "selected=%s|%s|%s|%s|%s|%s|%s|%s" \
+        printf "selected=%s|%s|%s|%s|%s|%s|%s|%s|%s|%s" \
           "${MONITOR_WECHAT_ENABLED}" \
           "${MONITOR_WECHAT_APP_ID}" \
           "${MONITOR_WECHAT_TEMPLATE_ID}" \
@@ -371,7 +371,9 @@ test_wechat_notifications_collects_immediate_and_daily_policy() {
           "${MONITOR_WECHAT_OPEN_IDS}" \
           "${MONITOR_WECHAT_IMMEDIATE_PUSH_ENABLED}" \
           "${MONITOR_WECHAT_DAILY_SUMMARY_ENABLED}" \
-          "${MONITOR_WECHAT_DAILY_SUMMARY_TIME}@${MONITOR_WECHAT_ZONE_ID}"
+          "${MONITOR_WECHAT_DAILY_SUMMARY_TIME}@${MONITOR_WECHAT_ZONE_ID}" \
+          "${MONITOR_WECHAT_DETAIL_PAGE_ENABLED}" \
+          "${MONITOR_WECHAT_DETAIL_PAGE_TOKEN_TTL_DAYS}"
       ' _ "${tmp_dir}/scripts/init-deploy.sh" 2>&1
   )" || {
     rm -rf "${tmp_dir}"
@@ -379,7 +381,45 @@ test_wechat_notifications_collects_immediate_and_daily_policy() {
   }
 
   rm -rf "${tmp_dir}"
-  assert_contains "${output}" "selected=true|wx_example_app|template_example_status|template_example_cost|openid_example_1,openid_example_2|true|true|21:30@Asia/Shanghai"
+  assert_contains "${output}" "selected=true|wx_example_app|template_example_status|template_example_cost|openid_example_1,openid_example_2|true|true|21:30@Asia/Shanghai|true|1"
+}
+
+test_wechat_detail_page_rejects_invalid_ttl_and_accepts_range() {
+  local output
+
+  output="$(
+    printf 'y\nwx_example_app\nexample-secret\ntemplate_example_status\ntemplate_example_cost\nopenid_example_1\n\ny\n09:00\n\n\n0\n91\n7\n' | \
+      MONITOR_PUBLIC_URL=https://monitor.example.com INIT_DEPLOY_LIB_ONLY=true bash -c '
+        source "$1"
+        collect_wechat_settings
+        printf "selected=%s|%s" \
+          "${MONITOR_WECHAT_DETAIL_PAGE_ENABLED}" \
+          "${MONITOR_WECHAT_DETAIL_PAGE_TOKEN_TTL_DAYS}"
+      ' _ "${ROOT_DIR}/scripts/init-deploy.sh" 2>&1
+  )" || return 1
+
+  assert_contains "${output}" "免登录明细令牌有效期必须为 1 至 90 天" || return 1
+  assert_contains "${output}" "selected=true|7"
+}
+
+test_wechat_detail_page_requires_https_origin() {
+  local output
+
+  output="$(
+    printf 'y\nwx_example_app\nexample-secret\ntemplate_example_status\ntemplate_example_cost\nopenid_example_1\n\ny\n09:00\n\n\n' | \
+      MONITOR_PUBLIC_URL=http://monitor.example.com INIT_DEPLOY_LIB_ONLY=true bash -c '
+        source "$1"
+        collect_wechat_settings
+        printf "selected=%s" "${MONITOR_WECHAT_DETAIL_PAGE_ENABLED}"
+      ' _ "${ROOT_DIR}/scripts/init-deploy.sh" 2>&1
+  )" || return 1
+
+  assert_contains "${output}" "免登录明细仅支持 HTTPS 用户访问地址" || return 1
+  assert_contains "${output}" "selected=false"
+}
+
+test_caddy_disables_browser_cache_for_public_report() {
+  grep -Fq 'Cache-Control "no-store"' "${ROOT_DIR}/web/Caddyfile"
 }
 
 test_wechat_cost_template_is_optional_when_daily_summary_is_disabled() {
@@ -403,7 +443,7 @@ test_wechat_daily_summary_requires_cost_template() {
   local output
 
   output="$(
-    printf 'y\nwx_example_app\nexample-secret\ntemplate_example_status\n\nopenid_example_1\n\ny\n\ntemplate_example_cost\n21:30\n\n' | \
+    printf 'y\nwx_example_app\nexample-secret\ntemplate_example_status\n\nopenid_example_1\n\ny\n\ntemplate_example_cost\n21:30\n\nn\n' | \
       INIT_DEPLOY_LIB_ONLY=true bash -c '
         source "$1"
         collect_wechat_settings
@@ -614,6 +654,9 @@ run_test "初始化脚本支持根 Compartment" test_init_deploy_root_compartmen
 run_test "已有私有配置不回显" test_existing_private_value_is_not_echoed
 run_test "关闭公众号通知时不追问或回显凭据" test_wechat_notifications_can_be_disabled_without_echoing_existing_credentials
 run_test "公众号通知收集即时和每日策略" test_wechat_notifications_collects_immediate_and_daily_policy
+run_test "公众号免登录明细令牌有效期限制" test_wechat_detail_page_rejects_invalid_ttl_and_accepts_range
+run_test "公众号免登录明细要求 HTTPS Origin" test_wechat_detail_page_requires_https_origin
+run_test "Web 容器禁用公开明细缓存" test_caddy_disables_browser_cache_for_public_report
 run_test "关闭每日摘要时费用模板可留空" test_wechat_cost_template_is_optional_when_daily_summary_is_disabled
 run_test "开启每日摘要时必须配置费用模板" test_wechat_daily_summary_requires_cost_template
 run_test "已有费用模板隐藏并保留" test_existing_wechat_cost_template_is_preserved_without_echoing_it

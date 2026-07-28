@@ -8,24 +8,39 @@ import java.util.List;
 import org.ociarmmonitor.serverstatus.ServerAlert;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.ociarmmonitor.publicreport.PublicReportAccess;
+import org.ociarmmonitor.publicreport.PublicReportService;
+import org.ociarmmonitor.publicreport.PublicReportSnapshot;
 
 @Service
 public class WechatNotificationService {
 
+  private static final Logger LOGGER = LoggerFactory.getLogger(WechatNotificationService.class);
   private static final DateTimeFormatter MESSAGE_TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
   private static final int MAX_FAILURE_REASON_LENGTH = 180;
 
   private final WechatNotificationSettingsRepository settingsRepository;
   private final WechatTemplateSender templateSender;
   private final DailyReportMessageAssembler dailyReportMessageAssembler;
+  private final PublicReportService publicReportService;
   private final Clock clock;
 
   @Autowired
   public WechatNotificationService(
     WechatNotificationSettingsRepository settingsRepository,
+    WechatTemplateSender templateSender,
+    PublicReportService publicReportService
+  ) {
+    this(settingsRepository, templateSender, publicReportService, Clock.systemUTC());
+  }
+
+  public WechatNotificationService(
+    WechatNotificationSettingsRepository settingsRepository,
     WechatTemplateSender templateSender
   ) {
-    this(settingsRepository, templateSender, Clock.systemUTC());
+    this(settingsRepository, templateSender, null, Clock.systemUTC());
   }
 
   WechatNotificationService(
@@ -33,9 +48,19 @@ public class WechatNotificationService {
     WechatTemplateSender templateSender,
     Clock clock
   ) {
+    this(settingsRepository, templateSender, null, clock);
+  }
+
+  WechatNotificationService(
+    WechatNotificationSettingsRepository settingsRepository,
+    WechatTemplateSender templateSender,
+    PublicReportService publicReportService,
+    Clock clock
+  ) {
     this.settingsRepository = settingsRepository;
     this.templateSender = templateSender;
     this.dailyReportMessageAssembler = new DailyReportMessageAssembler();
+    this.publicReportService = publicReportService;
     this.clock = clock;
   }
 
@@ -112,12 +137,14 @@ public class WechatNotificationService {
 
   public WechatDeliveryResult sendDailyStatus(DailyReportData data) {
     WechatNotificationSettings settings = requireAvailableSettings();
+    PublicReportSnapshot snapshot = createDetailSnapshot(data, settings);
     return deliver(
       "DAILY_STATUS",
       "",
       settings,
       WechatTemplateType.STATUS,
-      dailyReportMessageAssembler.statusMessages(data)
+      dailyReportMessageAssembler.statusMessages(data),
+      snapshot
     );
   }
 
@@ -126,12 +153,14 @@ public class WechatNotificationService {
     if (settings.costTemplateId().isBlank()) {
       throw new IllegalArgumentException("费用与流量模板未配置");
     }
+    PublicReportSnapshot snapshot = createDetailSnapshot(data, settings);
     return deliver(
       "DAILY_COST_TRAFFIC",
       "",
       settings,
       WechatTemplateType.COST_TRAFFIC,
-      dailyReportMessageAssembler.costTrafficMessage(data)
+      dailyReportMessageAssembler.costTrafficMessage(data),
+      snapshot
     );
   }
 
@@ -163,13 +192,36 @@ public class WechatNotificationService {
     WechatTemplateType templateType,
     List<WechatTemplateMessage> messages
   ) {
+    return deliver(notificationType, metricName, settings, templateType, messages, null);
+  }
+
+  private WechatDeliveryResult deliver(
+    String notificationType,
+    String metricName,
+    WechatNotificationSettings settings,
+    WechatTemplateType templateType,
+    WechatTemplateMessage message,
+    PublicReportSnapshot snapshot
+  ) {
+    return deliver(notificationType, metricName, settings, templateType, List.of(message), snapshot);
+  }
+
+  private WechatDeliveryResult deliver(
+    String notificationType,
+    String metricName,
+    WechatNotificationSettings settings,
+    WechatTemplateType templateType,
+    List<WechatTemplateMessage> messages,
+    PublicReportSnapshot snapshot
+  ) {
     int successCount = 0;
     int failureCount = 0;
     String failureReason = "";
     for (WechatTemplateMessage message : messages) {
       for (String openId : settings.openIds()) {
         try {
-          templateSender.sendTemplate(settings, openId, templateType, message);
+          String detailUrl = issueDetailUrl(snapshot, settings);
+          templateSender.sendTemplate(settings, openId, templateType, message, detailUrl);
           successCount++;
         } catch (RuntimeException exception) {
           failureCount++;
@@ -191,6 +243,37 @@ public class WechatNotificationService {
       resultMessage,
       Instant.now(clock).toString()
     );
+  }
+
+  private PublicReportSnapshot createDetailSnapshot(
+    DailyReportData data,
+    WechatNotificationSettings settings
+  ) {
+    if (!settings.detailPageEnabled() || publicReportService == null) {
+      return null;
+    }
+    try {
+      return publicReportService.createSnapshot(data, settings.detailPageTokenTtlDays());
+    } catch (RuntimeException exception) {
+      LOGGER.warn("微信公众号免登录明细快照生成失败，将继续发送摘要");
+      return null;
+    }
+  }
+
+  private String issueDetailUrl(
+    PublicReportSnapshot snapshot,
+    WechatNotificationSettings settings
+  ) {
+    if (snapshot == null || publicReportService == null) {
+      return "";
+    }
+    try {
+      PublicReportAccess access = publicReportService.issueAccess(snapshot, settings.publicUrl());
+      return access.url();
+    } catch (RuntimeException exception) {
+      LOGGER.warn("微信公众号免登录明细令牌生成失败，将继续发送摘要");
+      return "";
+    }
   }
 
   private String sanitizedFailureReason(

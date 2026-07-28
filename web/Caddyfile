@@ -5,6 +5,12 @@
 :8080 {
   encode zstd gzip
 
+  header {
+    Cache-Control "no-store"
+    Referrer-Policy "no-referrer"
+    X-Robots-Tag "noindex"
+  }
+
   handle /api/* {
     reverse_proxy oci-arm-monitor-server:9090
   }

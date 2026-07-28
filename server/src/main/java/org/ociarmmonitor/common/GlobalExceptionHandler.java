@@ -9,6 +9,8 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
+import jakarta.servlet.http.HttpServletResponse;
+import org.ociarmmonitor.publicreport.PublicReportNotFoundException;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
@@ -36,6 +38,18 @@ public class GlobalExceptionHandler {
   public ApiResponse<Void> handleNoResource(NoResourceFoundException exception) {
     LOGGER.warn("Resource not found: {}", exception.getResourcePath());
     return ApiResponse.fail("接口不存在或静态资源不存在");
+  }
+
+  @ExceptionHandler(PublicReportNotFoundException.class)
+  @ResponseStatus(HttpStatus.NOT_FOUND)
+  public ApiResponse<Void> handlePublicReportNotFound(
+    PublicReportNotFoundException exception,
+    HttpServletResponse response
+  ) {
+    response.setHeader("Cache-Control", "no-store");
+    response.setHeader("X-Robots-Tag", "noindex");
+    response.setHeader("Referrer-Policy", "no-referrer");
+    return ApiResponse.fail("报告不存在或已过期");
   }
 
   @ExceptionHandler(Exception.class)

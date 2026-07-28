@@ -16,6 +16,8 @@ render_compose() {
   MONITOR_WECHAT_TEMPLATE_ID=template_example_status \
   MONITOR_WECHAT_COST_TEMPLATE_ID=template_example_cost \
   MONITOR_WECHAT_OPEN_IDS=openid_example_1,openid_example_2 \
+  MONITOR_WECHAT_DETAIL_PAGE_ENABLED=true \
+  MONITOR_WECHAT_DETAIL_PAGE_TOKEN_TTL_DAYS=1 \
   MONITOR_SETTINGS_ENCRYPTION_KEY=replace-with-base64-32-byte-key \
   OCI_REGION=us-example-1 \
   OCI_COMPARTMENT_OCID=ocid1.compartment.oc1..replace-with-your-compartment-ocid \
@@ -35,6 +37,8 @@ jq -e '.services["oci-arm-monitor-server"].environment.MONITOR_WECHAT_APP_SECRET
 jq -e '.services["oci-arm-monitor-server"].environment.MONITOR_WECHAT_TEMPLATE_ID == "template_example_status"' <<<"${COMPOSE_CONFIG}" >/dev/null
 jq -e '.services["oci-arm-monitor-server"].environment.MONITOR_WECHAT_COST_TEMPLATE_ID == "template_example_cost"' <<<"${COMPOSE_CONFIG}" >/dev/null
 jq -e '.services["oci-arm-monitor-server"].environment.MONITOR_WECHAT_OPEN_IDS == "openid_example_1,openid_example_2"' <<<"${COMPOSE_CONFIG}" >/dev/null
+jq -e '.services["oci-arm-monitor-server"].environment.MONITOR_WECHAT_DETAIL_PAGE_ENABLED == "true"' <<<"${COMPOSE_CONFIG}" >/dev/null
+jq -e '.services["oci-arm-monitor-server"].environment.MONITOR_WECHAT_DETAIL_PAGE_TOKEN_TTL_DAYS == "1"' <<<"${COMPOSE_CONFIG}" >/dev/null
 jq -e '.services["oci-arm-monitor-server"].environment.MONITOR_SETTINGS_ENCRYPTION_KEY == "replace-with-base64-32-byte-key"' <<<"${COMPOSE_CONFIG}" >/dev/null
 jq -e '.services["oci-arm-monitor-web"].ports[] | select(
   .host_ip == "127.0.0.1" and

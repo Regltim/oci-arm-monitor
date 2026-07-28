@@ -66,7 +66,7 @@ bash scripts/init-deploy.sh
 3. 管理员账号和密码。
 4. OCI 认证模式、Region、Tenancy 和目标 Compartment。
 5. API Key 模式所需的 OCI config 路径。
-6. 可选的微信公众号双模板、接收人和推送策略。
+6. 可选的微信公众号双模板、接收人、推送策略和免登录明细有效期。
 
 公开 Origin 只能包含协议、主机名和可选端口，不能带路径、查询参数或末尾斜杠。它用于生成 CORS 和 Cookie 配置，不负责容器 TLS。
 
@@ -87,12 +87,14 @@ MONITOR_WECHAT_IMMEDIATE_PUSH_ENABLED=true
 MONITOR_WECHAT_DAILY_SUMMARY_ENABLED=false
 MONITOR_WECHAT_DAILY_SUMMARY_TIME=09:00
 MONITOR_WECHAT_ZONE_ID=Asia/Shanghai
+MONITOR_WECHAT_DETAIL_PAGE_ENABLED=false
+MONITOR_WECHAT_DETAIL_PAGE_TOKEN_TTL_DAYS=1
 MONITOR_SETTINGS_ENCRYPTION_KEY=
 MONITOR_CORS_ALLOWED_ORIGINS=https://monitor.example.com
 MONITOR_COOKIE_SECURE=true
 ```
 
-微信公众号通知可以在初始化脚本中配置，也可以部署后在“系统设置 → 通知设置”中维护。运行状态和费用流量使用两份独立的四字段摘要模板，后三个字段需要带固定文字或项目符号，后端会根据 Template ID 自动读取真实字段名。微信客户端可能折叠或截断较长内容，因此模板消息应作为状态提醒使用，完整数据以监控面板为准。当前消息不带网页跳转。脚本会自动生成 `MONITOR_SETTINGS_ENCRYPTION_KEY`，用于加密页面保存到 SQLite 的公众号凭据。详细步骤见[微信公众号通知配置](wechat-notifications.md)。
+微信公众号通知可以在初始化脚本中配置，也可以部署后在“系统设置 → 通知设置”中维护。运行状态和费用流量使用两份独立的四字段摘要模板，后三个字段需要带固定文字或项目符号，后端会根据 Template ID 自动读取真实字段名。每日摘要可附带同域名免登录 H5 快照，令牌默认有效 1 天；容器仍不管理域名或证书。脚本会自动生成 `MONITOR_SETTINGS_ENCRYPTION_KEY`，用于加密页面保存到 SQLite 的公众号凭据。详细步骤见[微信公众号通知配置](wechat-notifications.md)。
 
 重新运行脚本会备份旧 `.env`。已有域名、OCID 和密码不会在提示中明文回显。
 
@@ -150,6 +152,8 @@ curl -sS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:28461/api/auth/me
 ```
 
 首页应返回成功响应；未登录访问 `/api/auth/me` 返回 `401` 属于正常行为。
+
+启用微信免登录明细后，无需新增反向代理规则。H5 使用 Hash 路由，微信链接中的访问令牌不会进入 Nginx/OpenResty 普通访问日志。
 
 ## 7. 配置 Nginx / OpenResty
 

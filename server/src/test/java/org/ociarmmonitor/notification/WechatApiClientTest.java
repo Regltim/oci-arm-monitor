@@ -57,7 +57,13 @@ class WechatApiClientTest {
     server.start();
     WechatApiClient client = client();
 
-    client.sendTemplate(settings(), "openid_example_1", WechatTemplateType.STATUS, message());
+    client.sendTemplate(
+      settings(),
+      "openid_example_1",
+      WechatTemplateType.STATUS,
+      message(),
+      "https://monitor.example.com/#/r/snapshot-example?token=token-example"
+    );
     client.sendTemplate(settings(), "openid_example_2", WechatTemplateType.COST_TRAFFIC, message());
 
     assertThat(tokenRequests).hasValue(1);
@@ -65,10 +71,12 @@ class WechatApiClientTest {
     JsonNode payload = objectMapper.readTree(messageBodies.get(0));
     assertThat(payload.path("touser").asText()).isEqualTo("openid_example_1");
     assertThat(payload.path("template_id").asText()).isEqualTo("template_example_status");
-    assertThat(payload.has("url")).isFalse();
+    assertThat(payload.path("url").asText())
+      .isEqualTo("https://monitor.example.com/#/r/snapshot-example?token=token-example");
     assertThat(payload.has("miniprogram")).isFalse();
     JsonNode costPayload = objectMapper.readTree(messageBodies.get(1));
     assertThat(costPayload.path("template_id").asText()).isEqualTo("template_example_cost");
+    assertThat(costPayload.has("url")).isFalse();
     JsonNode data = payload.path("data");
     assertThat(data.properties()).extracting(java.util.Map.Entry::getKey)
       .containsExactly("first", "item1", "item2", "item3");

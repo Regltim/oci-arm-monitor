@@ -21,7 +21,7 @@ class DailyReportMessageAssemblerTest {
   private final DailyReportMessageAssembler assembler = new DailyReportMessageAssembler();
 
   @Test
-  void formatsStatusAsSummaryInstanceAndAlertCardsWithoutWebsiteHints() {
+  void formatsStatusAsOneSummaryCardAndKeepsDetailsForTheH5Snapshot() {
     DailyReportContext context = context();
     DailyReportData data = new DailyReportData(
       context,
@@ -48,7 +48,7 @@ class DailyReportMessageAssemblerTest {
     List<WechatTemplateMessage> statusMessages = assembler.statusMessages(data);
     WechatTemplateMessage costTraffic = assembler.costTrafficMessage(data);
 
-    assertThat(statusMessages).hasSize(3);
+    assertThat(statusMessages).hasSize(1);
     WechatTemplateMessage summary = statusMessages.get(0);
     assertThat(summary.first()).isEqualTo("OCI ARM Monitor 每日运行状态");
     assertThat(summary.item1()).isEqualTo("实例：共 2 台｜运行 1｜停止 1｜其他 0");
@@ -58,18 +58,6 @@ class DailyReportMessageAssemblerTest {
       .contains("同步：失败 2026-07-27 08:41:00")
       .contains("最近成功 2026-07-27 08:02:16");
 
-    WechatTemplateMessage instances = statusMessages.get(1);
-    assertThat(instances.first()).isEqualTo("实例明细 1/1");
-    assertThat(instances.item1()).isEqualTo("1. arm-app-01：运行中｜CPU 12.30%｜内存 41.20%");
-    assertThat(instances.item2()).isEqualTo("2. arm-backup：已停止");
-    assertThat(instances.item3()).isBlank();
-
-    WechatTemplateMessage alerts = statusMessages.get(2);
-    assertThat(alerts.first()).isEqualTo("告警明细 1/1");
-    assertThat(alerts.item1())
-      .isEqualTo("1. [警告] 磁盘使用率｜磁盘使用率当前 91.00%，阈值 80.00%。");
-    assertThat(alerts.item2()).isBlank();
-    assertThat(alerts.item3()).isBlank();
     assertThat(statusMessages).allSatisfy(message -> visibleValues(message).forEach(value ->
       assertThat(value).doesNotContain("点击").doesNotContain("http").doesNotContain("\n")
     ));
@@ -135,21 +123,16 @@ class DailyReportMessageAssemblerTest {
     List<WechatTemplateMessage> messages = assembler.statusMessages(data);
     List<String> visibleValues = messages.stream().flatMap(message -> visibleValues(message).stream()).toList();
 
-    assertThat(messages).hasSize(5);
-    assertThat(messages.get(1).first()).isEqualTo("实例明细 1/4");
-    assertThat(messages.get(4).first()).isEqualTo("实例明细 4/4");
-    assertThat(messages.get(4).item2()).isEqualTo("另有 20 台实例未展示");
+    assertThat(messages).hasSize(1);
     assertThat(visibleValues).allSatisfy(value -> {
       assertThat(value.codePointCount(0, value.length())).isLessThanOrEqualTo(180);
       assertThat(value).doesNotContain("\n");
     });
-    assertThat(String.join("|", visibleValues))
-      .contains("instance-0 恶意换行")
-      .doesNotContain("instance-10：");
+    assertThat(String.join("|", visibleValues)).doesNotContain("instance-0");
   }
 
   @Test
-  void limitsAlertDetailsToFiveAndSplitsEveryThreeItems() {
+  void keepsAlertCountInSummaryWithoutSendingSupplementCards() {
     List<ServerAlert> alerts = new ArrayList<>();
     for (int index = 1; index <= 7; index++) {
       alerts.add(new ServerAlert(
@@ -175,12 +158,8 @@ class DailyReportMessageAssemblerTest {
 
     List<WechatTemplateMessage> messages = assembler.statusMessages(data);
 
-    assertThat(messages).hasSize(3);
-    assertThat(messages.get(1).first()).isEqualTo("告警明细 1/2");
-    assertThat(messages.get(1).item1()).isEqualTo("1. [严重] 告警 1｜第 1 项 告警详情");
-    assertThat(messages.get(2).first()).isEqualTo("告警明细 2/2");
-    assertThat(messages.get(2).item3()).isEqualTo("另有 2 项告警未展示");
-    assertThat(String.join("|", visibleValues(messages.get(2)))).doesNotContain("告警 6");
+    assertThat(messages).hasSize(1);
+    assertThat(messages.get(0).item3()).startsWith("告警：7 项");
   }
 
   private List<String> visibleValues(WechatTemplateMessage message) {

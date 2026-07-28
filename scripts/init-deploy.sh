@@ -177,6 +177,10 @@ validate_daily_time() {
   [ "$((10#${hour}))" -le 23 ] && [ "$((10#${minute}))" -le 59 ]
 }
 
+validate_detail_page_ttl_days() {
+  [[ "$1" =~ ^[0-9]+$ ]] && [ "$1" -ge 1 ] && [ "$1" -le 90 ]
+}
+
 validate_hostname() {
   local value="$1"
   local label
@@ -231,6 +235,10 @@ validate_public_origin() {
   [ -z "${port}" ] || validate_http_port "${port}"
 }
 
+validate_https_public_origin() {
+  [[ "$1" == https://* ]] && validate_public_origin "$1"
+}
+
 configure_public_access() {
   local public_url="$1"
   local web_port="$2"
@@ -274,6 +282,8 @@ collect_wechat_settings() {
   local daily_default
   local daily_time_default
   local zone_id_default
+  local detail_page_default
+  local detail_page_ttl_default
 
   MONITOR_WECHAT_APP_ID="$(read_env_value MONITOR_WECHAT_APP_ID || true)"
   MONITOR_WECHAT_APP_SECRET="$(read_env_value MONITOR_WECHAT_APP_SECRET || true)"
@@ -285,11 +295,19 @@ collect_wechat_settings() {
   daily_default="$(read_env_value MONITOR_WECHAT_DAILY_SUMMARY_ENABLED || true)"
   daily_time_default="$(read_env_value MONITOR_WECHAT_DAILY_SUMMARY_TIME || true)"
   zone_id_default="$(read_env_value MONITOR_WECHAT_ZONE_ID || true)"
+  detail_page_default="$(read_env_value MONITOR_WECHAT_DETAIL_PAGE_ENABLED || true)"
+  detail_page_ttl_default="$(read_env_value MONITOR_WECHAT_DETAIL_PAGE_TOKEN_TTL_DAYS || true)"
 
   immediate_default="${immediate_default:-true}"
   daily_default="${daily_default:-false}"
   daily_time_default="${daily_time_default:-09:00}"
   zone_id_default="${zone_id_default:-Asia/Shanghai}"
+  detail_page_default="${detail_page_default:-true}"
+  detail_page_ttl_default="${detail_page_ttl_default:-1}"
+  if ! validate_detail_page_ttl_days "${detail_page_ttl_default}"; then
+    warn "已有免登录明细令牌有效期无效，将恢复为 1 天。"
+    detail_page_ttl_default="1"
+  fi
 
   if is_true "${enabled_default}"; then
     if confirm "是否启用微信公众号通知" "y"; then
@@ -308,6 +326,8 @@ collect_wechat_settings() {
     MONITOR_WECHAT_DAILY_SUMMARY_ENABLED="${daily_default}"
     MONITOR_WECHAT_DAILY_SUMMARY_TIME="${daily_time_default}"
     MONITOR_WECHAT_ZONE_ID="${zone_id_default}"
+    MONITOR_WECHAT_DETAIL_PAGE_ENABLED="false"
+    MONITOR_WECHAT_DETAIL_PAGE_TOKEN_TTL_DAYS="${detail_page_ttl_default}"
     return 0
   fi
 
@@ -356,6 +376,39 @@ collect_wechat_settings() {
       warn "每日推送时间格式必须为 HH:mm，例如 09:00。"
     done
     ask MONITOR_WECHAT_ZONE_ID "每日状态摘要时区" "${zone_id_default}" true
+
+    if is_true "${detail_page_default}"; then
+      if confirm "点击微信摘要时是否打开免登录明细" "y"; then
+        MONITOR_WECHAT_DETAIL_PAGE_ENABLED="true"
+      else
+        MONITOR_WECHAT_DETAIL_PAGE_ENABLED="false"
+      fi
+    elif confirm "点击微信摘要时是否打开免登录明细" "n"; then
+      MONITOR_WECHAT_DETAIL_PAGE_ENABLED="true"
+    else
+      MONITOR_WECHAT_DETAIL_PAGE_ENABLED="false"
+    fi
+
+    if [ "${MONITOR_WECHAT_DETAIL_PAGE_ENABLED}" = "true" ] \
+      && ! validate_https_public_origin "${MONITOR_PUBLIC_URL:-}"; then
+      warn "免登录明细仅支持 HTTPS 用户访问地址，已保持关闭。"
+      MONITOR_WECHAT_DETAIL_PAGE_ENABLED="false"
+    fi
+
+    MONITOR_WECHAT_DETAIL_PAGE_TOKEN_TTL_DAYS="${detail_page_ttl_default}"
+    if [ "${MONITOR_WECHAT_DETAIL_PAGE_ENABLED}" = "true" ]; then
+      while true; do
+        ask MONITOR_WECHAT_DETAIL_PAGE_TOKEN_TTL_DAYS \
+          "免登录明细令牌有效期（1-90 天）" \
+          "${detail_page_ttl_default}" \
+          true
+        validate_detail_page_ttl_days "${MONITOR_WECHAT_DETAIL_PAGE_TOKEN_TTL_DAYS}" && break
+        warn "免登录明细令牌有效期必须为 1 至 90 天。"
+      done
+    fi
+  else
+    MONITOR_WECHAT_DETAIL_PAGE_ENABLED="false"
+    MONITOR_WECHAT_DETAIL_PAGE_TOKEN_TTL_DAYS="${detail_page_ttl_default}"
   fi
 }
 
@@ -483,6 +536,8 @@ write_env_file() {
     write_env_entry "MONITOR_WECHAT_DAILY_SUMMARY_ENABLED" "${MONITOR_WECHAT_DAILY_SUMMARY_ENABLED}"
     write_env_entry "MONITOR_WECHAT_DAILY_SUMMARY_TIME" "${MONITOR_WECHAT_DAILY_SUMMARY_TIME}"
     write_env_entry "MONITOR_WECHAT_ZONE_ID" "${MONITOR_WECHAT_ZONE_ID}"
+    write_env_entry "MONITOR_WECHAT_DETAIL_PAGE_ENABLED" "${MONITOR_WECHAT_DETAIL_PAGE_ENABLED}"
+    write_env_entry "MONITOR_WECHAT_DETAIL_PAGE_TOKEN_TTL_DAYS" "${MONITOR_WECHAT_DETAIL_PAGE_TOKEN_TTL_DAYS}"
     write_env_entry "MONITOR_SETTINGS_ENCRYPTION_KEY" "${MONITOR_SETTINGS_ENCRYPTION_KEY}"
   } > "${tmp_file}"
 

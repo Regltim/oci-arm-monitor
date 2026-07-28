@@ -20,6 +20,7 @@ import {
   Descriptions,
   Form,
   Input,
+  InputNumber,
   Select,
   Space,
   Switch,
@@ -89,6 +90,7 @@ export default function WechatNotificationSettings() {
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<WechatTestDeliveryResult>();
   const dailySummaryEnabled = Form.useWatch('dailySummaryEnabled', form);
+  const detailPageEnabled = Form.useWatch('detailPageEnabled', form);
 
   const settingsRequest = useAsyncData(async () => {
     const settings = await getWechatNotificationSettings();
@@ -103,6 +105,8 @@ export default function WechatNotificationSettings() {
       dailySummaryEnabled: settings.dailySummaryEnabled,
       dailySummaryTime: settings.dailySummaryTime,
       zoneId: settings.zoneId,
+      detailPageEnabled: settings.detailPageEnabled,
+      detailPageTokenTtlDays: settings.detailPageTokenTtlDays,
     });
     return settings;
   }, []);
@@ -191,11 +195,19 @@ export default function WechatNotificationSettings() {
           description={status.dailySummaryMissingReason}
         />
       ) : null}
+      {status?.detailPageEnabled && !status.detailPageReady ? (
+        <Alert
+          type="warning"
+          showIcon
+          message="免登录明细未就绪"
+          description={status.detailPageMissingReason}
+        />
+      ) : null}
       <Alert
         type="info"
         showIcon
         message="请使用四字段模板"
-        description="两个公众号模板都必须正好包含四个不同字段，系统会按 Template ID 自动识别字段名和顺序。旧七字段模板需要在公众号后台重建并替换；运行汇总会按实例和告警拆成多张消息，费用与流量使用一张消息。"
+        description="两个公众号模板都必须正好包含四个不同字段，系统会按 Template ID 自动识别字段名和顺序。每日运行和费用流量各发送一张摘要；开启免登录明细后，点击摘要可查看发送时的数据快照。"
       />
       <Card loading={settingsRequest.loading} title="公众号配置">
         <Space direction="vertical" size={16} style={{ width: '100%' }}>
@@ -213,6 +225,11 @@ export default function WechatNotificationSettings() {
             <Descriptions.Item label="每日汇总推送">
               <Tag color={status?.dailySummaryConfigured ? 'green' : 'default'}>
                 {status?.dailySummaryConfigured ? '配置完整' : '未就绪'}
+              </Tag>
+            </Descriptions.Item>
+            <Descriptions.Item label="免登录明细">
+              <Tag color={status?.detailPageEnabled && status.detailPageReady ? 'green' : 'default'}>
+                {status?.detailPageEnabled && status.detailPageReady ? `已启用 · ${status.detailPageTokenTtlDays} 天` : '未启用'}
               </Tag>
             </Descriptions.Item>
           </Descriptions>
@@ -265,7 +282,13 @@ export default function WechatNotificationSettings() {
                 <Switch />
               </Form.Item>
               <Form.Item label="每日汇总推送" name="dailySummaryEnabled" valuePropName="checked">
-                <Switch />
+                <Switch
+                  onChange={(checked) => {
+                    if (!checked) {
+                      form.setFieldValue('detailPageEnabled', false);
+                    }
+                  }}
+                />
               </Form.Item>
               <Form.Item
                 label="每日推送时间"
@@ -276,6 +299,28 @@ export default function WechatNotificationSettings() {
               </Form.Item>
               <Form.Item label="时区" name="zoneId" rules={[{ required: true, message: '请选择时区' }]}>
                 <Select showSearch disabled={!dailySummaryEnabled} options={zoneOptions} />
+              </Form.Item>
+            </div>
+
+            <div className="settings-section-title">微信明细页</div>
+            <div className="grid-2">
+              <Form.Item
+                label="点击摘要查看免登录明细"
+                name="detailPageEnabled"
+                valuePropName="checked"
+                extra="仅展示通知发送时的脱敏快照"
+              >
+                <Switch disabled={!status?.detailPageReady || !dailySummaryEnabled} />
+              </Form.Item>
+              <Form.Item
+                label="访问令牌有效期"
+                name="detailPageTokenTtlDays"
+                rules={[
+                  { required: true, message: '请输入访问令牌有效期' },
+                  { type: 'number', min: 1, max: 90, message: '有效期必须为 1 至 90 天' },
+                ]}
+              >
+                <InputNumber min={1} max={90} precision={0} addonAfter="天" disabled={!detailPageEnabled} />
               </Form.Item>
             </div>
 

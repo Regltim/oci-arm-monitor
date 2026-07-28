@@ -21,11 +21,7 @@ public class DailyReportMessageAssembler {
   private static final DateTimeFormatter TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
   public List<WechatTemplateMessage> statusMessages(DailyReportData data) {
-    List<WechatTemplateMessage> messages = new ArrayList<>();
-    messages.add(statusMessage(data));
-    messages.addAll(instanceMessages(data.instances()));
-    messages.addAll(alertMessages(data.alerts()));
-    return List.copyOf(messages);
+    return List.of(statusMessage(data));
   }
 
   public WechatTemplateMessage statusMessage(DailyReportData data) {

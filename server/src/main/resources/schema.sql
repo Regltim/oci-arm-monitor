@@ -212,6 +212,41 @@ CREATE TABLE IF NOT EXISTS wechat_daily_summary_state (
   updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS wechat_detail_page_setting (
+  id TEXT PRIMARY KEY,
+  enabled INTEGER NOT NULL,
+  token_ttl_days INTEGER NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS public_report_snapshot (
+  id TEXT PRIMARY KEY,
+  report_type TEXT NOT NULL,
+  payload_json TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_public_report_snapshot_expires_at
+  ON public_report_snapshot(expires_at);
+
+CREATE TABLE IF NOT EXISTS public_report_access (
+  id TEXT PRIMARY KEY,
+  snapshot_id TEXT NOT NULL,
+  token_hash TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  revoked_at TEXT,
+  last_accessed_at TEXT,
+  access_count INTEGER NOT NULL DEFAULT 0,
+  FOREIGN KEY(snapshot_id) REFERENCES public_report_snapshot(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_public_report_access_snapshot
+  ON public_report_access(snapshot_id);
+
+CREATE INDEX IF NOT EXISTS idx_public_report_access_expires_at
+  ON public_report_access(expires_at);
+
 INSERT OR IGNORE INTO sync_schedule(id, enabled, cron_expression, zone_id, sync_on_startup, updated_at)
 VALUES ('default', 1, '0 0 0 * * *', 'Asia/Shanghai', 0, datetime('now'));
 

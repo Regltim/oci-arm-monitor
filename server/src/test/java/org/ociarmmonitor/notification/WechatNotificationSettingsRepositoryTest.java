@@ -50,6 +50,8 @@ class WechatNotificationSettingsRepositoryTest {
     assertThat(status.costTemplateIdMasked()).isEqualTo("temp****cost");
     assertThat(status.appSecretConfigured()).isTrue();
     assertThat(status.recipientCount()).isEqualTo(2);
+    assertThat(status.detailPageEnabled()).isFalse();
+    assertThat(status.detailPageTokenTtlDays()).isEqualTo(1);
   }
 
   @Test
@@ -64,7 +66,9 @@ class WechatNotificationSettingsRepositoryTest {
       false,
       true,
       "21:30",
-      "Asia/Shanghai"
+      "Asia/Shanghai",
+      true,
+      1
     ));
 
     assertThat(updated.source()).isEqualTo("DATABASE");
@@ -73,6 +77,8 @@ class WechatNotificationSettingsRepositoryTest {
     assertThat(updated.dailySummaryEnabled()).isTrue();
     assertThat(updated.dailySummaryConfigured()).isTrue();
     assertThat(updated.dailySummaryTime().toString()).isEqualTo("21:30");
+    assertThat(updated.detailPageEnabled()).isTrue();
+    assertThat(updated.detailPageTokenTtlDays()).isEqualTo(1);
 
     String storedValues = jdbcTemplate.queryForObject("""
       SELECT s.encrypted_app_id || s.encrypted_app_secret || s.encrypted_template_id
@@ -211,7 +217,7 @@ class WechatNotificationSettingsRepositoryTest {
     assertThat(legacyJdbcTemplate.queryForObject(
       "SELECT public_url FROM wechat_notification_setting WHERE id = 'default'",
       String.class
-    )).isEqualTo("https://legacy.example.com");
+    )).isEqualTo("https://monitor.example.com");
   }
 
   @Test
@@ -246,6 +252,58 @@ class WechatNotificationSettingsRepositoryTest {
       false, "", "", "", "", "", true, false, "09:00", "Invalid/Zone"
     ))).isInstanceOf(IllegalArgumentException.class)
       .hasMessage("时区无效：Invalid/Zone");
+
+    assertThatThrownBy(() -> repository.update(new WechatNotificationSettingsUpdateRequest(
+      false, "", "", "", "", "", true, false, "09:00", "Asia/Shanghai", false, 91
+    ))).isInstanceOf(IllegalArgumentException.class)
+      .hasMessage("明细访问令牌有效期必须为 1 至 90 天");
+
+    assertThatThrownBy(() -> repository.update(new WechatNotificationSettingsUpdateRequest(
+      false, "", "", "", "", "", true, false, "09:00", "Asia/Shanghai", false, 0
+    ))).isInstanceOf(IllegalArgumentException.class)
+      .hasMessage("明细访问令牌有效期必须为 1 至 90 天");
+
+    assertThatThrownBy(() -> repository.update(new WechatNotificationSettingsUpdateRequest(
+      false, "", "", "", "", "", true, false, "09:00", "Asia/Shanghai", true, 1
+    ))).isInstanceOf(IllegalArgumentException.class)
+      .hasMessage("启用免登录明细前，请先启用每日摘要");
+  }
+
+  @Test
+  void requiresHttpsPublicUrlWhenDetailPageIsEnabled() {
+    WechatNotificationSettingsRepository repositoryWithoutPublicUrl = new WechatNotificationSettingsRepository(
+      jdbcTemplate,
+      new WechatNotificationProperties(
+        true,
+        "wx_example_app_id",
+        "wx_example_secret",
+        "template_example_01",
+        "template_example_cost",
+        "openid_example_1",
+        true,
+        false,
+        "09:00",
+        "Asia/Shanghai",
+        "https://api.weixin.qq.com"
+      ),
+      new WechatSecretCipher(VALID_KEY)
+    );
+
+    assertThatThrownBy(() -> repositoryWithoutPublicUrl.update(new WechatNotificationSettingsUpdateRequest(
+      true,
+      "",
+      "",
+      "",
+      "",
+      "",
+      true,
+      true,
+      "09:00",
+      "Asia/Shanghai",
+      true,
+      1
+    ))).isInstanceOf(IllegalArgumentException.class)
+      .hasMessage("启用免登录明细前，请将 MONITOR_PUBLIC_URL 配置为 HTTPS 地址");
   }
 
   @Test
@@ -277,6 +335,7 @@ class WechatNotificationSettingsRepositoryTest {
       false,
       "09:00",
       "Asia/Shanghai",
+      "https://monitor.example.com",
       "https://api.weixin.qq.com"
     );
   }

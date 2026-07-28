@@ -9,6 +9,7 @@ OCI ARM Monitor 是一个可自托管的 Oracle Cloud Infrastructure 资源监�
 - 免费额度与费用汇总
 - OCI 连接诊断和定时同步
 - 微信公众号告警、恢复、运行状态和费用流量摘要通知
+- 微信摘要免登录 H5 明细，使用限时脱敏快照
 - Instance Principal 和 API Key 两种认证方式
 - 前端、后端和 SQLite 一体化 Docker Compose 部署
 
@@ -29,6 +30,8 @@ OCI ARM Monitor 是一个可自托管的 Oracle Cloud Infrastructure 资源监�
 ```
 
 容器只在宿主机回环地址暴露一个 Web 端口。域名、证书、TLS 和公网入口由服务器已有的 Nginx、OpenResty 或 1Panel 管理；容器不会申请、保存或续期证书。后端 `9090` 只在 Docker 网络内可用。
+
+微信公众号每日摘要可选配免登录明细。点击消息后打开同一域名下的 H5 快照，不需要登录监控后台；访问令牌默认有效 1 天，每位接收人使用独立令牌。快照不会包含 OCID、IP、OpenID 或公众号凭据。
 
 ## 快速部署
 

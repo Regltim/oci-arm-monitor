@@ -47,6 +47,8 @@ monitor:
     daily-summary-enabled: ${MONITOR_WECHAT_DAILY_SUMMARY_ENABLED:false}
     daily-summary-time: ${MONITOR_WECHAT_DAILY_SUMMARY_TIME:09:00}
     zone-id: ${MONITOR_WECHAT_ZONE_ID:Asia/Shanghai}
+    detail-page-enabled: ${MONITOR_WECHAT_DETAIL_PAGE_ENABLED:false}
+    detail-page-token-ttl-days: ${MONITOR_WECHAT_DETAIL_PAGE_TOKEN_TTL_DAYS:1}
     public-url: ${MONITOR_PUBLIC_URL:}
     api-base-url: ${MONITOR_WECHAT_API_BASE_URL:https://api.weixin.qq.com}
     settings-encryption-key: ${MONITOR_SETTINGS_ENCRYPTION_KEY:}

@@ -24,6 +24,10 @@ import org.springframework.core.io.ClassPathResource;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 import org.springframework.jdbc.datasource.init.ResourceDatabasePopulator;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.security.SecureRandom;
+import org.ociarmmonitor.publicreport.PublicReportService;
+import org.ociarmmonitor.publicreport.PublicReportSnapshotMapper;
 
 class WechatNotificationServiceTest {
 
@@ -114,12 +118,10 @@ class WechatNotificationServiceTest {
     WechatDeliveryResult dailyStatus = service.sendDailyStatus(dailyReportData());
     service.sendDailyCostTraffic(dailyReportData());
 
-    assertThat(dailyStatus.successCount()).isEqualTo(4);
+    assertThat(dailyStatus.successCount()).isEqualTo(2);
     assertThat(dailyStatus.failureCount()).isZero();
     assertThat(sender.deliveries).extracting(SentTemplate::templateType)
       .containsExactly(
-        WechatTemplateType.STATUS,
-        WechatTemplateType.STATUS,
         WechatTemplateType.STATUS,
         WechatTemplateType.STATUS,
         WechatTemplateType.STATUS,
@@ -139,8 +141,7 @@ class WechatNotificationServiceTest {
     assertThat(sender.deliveries.get(2).message().item2()).isEqualTo("说明：CPU 使用率已恢复至阈值范围内。");
     assertThat(sender.deliveries.get(2).message().item3()).isEqualTo("时间：2026-07-27 09:00:00");
     assertThat(sender.deliveries.get(4).message().first()).isEqualTo("OCI ARM Monitor 每日运行状态");
-    assertThat(sender.deliveries.get(6).message().first()).isEqualTo("告警明细 1/1");
-    assertThat(sender.deliveries.get(8).message().first()).isEqualTo("OCI ARM Monitor 费用与流量");
+    assertThat(sender.deliveries.get(6).message().first()).isEqualTo("OCI ARM Monitor 费用与流量");
     assertThat(sender.deliveries).allSatisfy(delivery ->
       assertThat(List.of(
         delivery.message().first(),
@@ -149,6 +150,17 @@ class WechatNotificationServiceTest {
         delivery.message().item3()
       )).allSatisfy(value -> assertThat(value).doesNotContain("点击").doesNotContain("监控面板"))
     );
+    assertThat(sender.deliveries.subList(0, 4)).allSatisfy(delivery ->
+      assertThat(delivery.detailUrl()).isBlank()
+    );
+    assertThat(sender.deliveries.subList(4, 8)).allSatisfy(delivery ->
+      assertThat(delivery.detailUrl())
+        .startsWith("https://monitor.example.com/#/r/")
+        .contains("?token=")
+    );
+    assertThat(sender.deliveries.subList(4, 8)).extracting(SentTemplate::detailUrl).doesNotHaveDuplicates();
+    assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM public_report_snapshot", Integer.class)).isEqualTo(2);
+    assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM public_report_access", Integer.class)).isEqualTo(4);
   }
 
   @Test
@@ -187,9 +199,16 @@ class WechatNotificationServiceTest {
     WechatNotificationSettingsRepository settingsRepository = new WechatNotificationSettingsRepository(
       jdbcTemplate,
       properties,
-      new WechatSecretCipher(VALID_KEY)
+      new WechatSecretCipher(VALID_KEY),
+      true,
+      1
     );
-    return new WechatNotificationService(settingsRepository, sender, FIXED_CLOCK);
+    PublicReportService publicReportService = new PublicReportService(
+      jdbcTemplate,
+      new ObjectMapper(),
+      new PublicReportSnapshotMapper()
+    );
+    return new WechatNotificationService(settingsRepository, sender, publicReportService, FIXED_CLOCK);
   }
 
   private WechatNotificationProperties properties(boolean enabled, String costTemplateId) {
@@ -204,6 +223,7 @@ class WechatNotificationServiceTest {
       false,
       "09:00",
       "Asia/Shanghai",
+      "https://monitor.example.com",
       "https://api.weixin.qq.com"
     );
   }
@@ -280,7 +300,8 @@ class WechatNotificationServiceTest {
   private record SentTemplate(
     String openId,
     WechatTemplateType templateType,
-    WechatTemplateMessage message
+    WechatTemplateMessage message,
+    String detailUrl
   ) {
   }
 
@@ -297,7 +318,18 @@ class WechatNotificationServiceTest {
       WechatTemplateType templateType,
       WechatTemplateMessage message
     ) {
-      deliveries.add(new SentTemplate(openId, templateType, message));
+      sendTemplate(settings, openId, templateType, message, "");
+    }
+
+    @Override
+    public void sendTemplate(
+      WechatNotificationSettings settings,
+      String openId,
+      WechatTemplateType templateType,
+      WechatTemplateMessage message,
+      String detailUrl
+    ) {
+      deliveries.add(new SentTemplate(openId, templateType, message, detailUrl));
       if (!failureMessage.isBlank()) {
         throw new WechatApiException(failureMessage);
       }

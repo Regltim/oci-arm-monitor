@@ -196,6 +196,10 @@ export interface WechatNotificationSettingsStatus {
   zoneId: string;
   encryptionReady: boolean;
   updatedAt: string;
+  detailPageEnabled: boolean;
+  detailPageReady: boolean;
+  detailPageMissingReason: string;
+  detailPageTokenTtlDays: number;
 }
 
 export interface WechatNotificationSettingsUpdateRequest {
@@ -209,6 +213,120 @@ export interface WechatNotificationSettingsUpdateRequest {
   dailySummaryEnabled: boolean;
   dailySummaryTime: string;
   zoneId: string;
+  detailPageEnabled: boolean;
+  detailPageTokenTtlDays: number;
+}
+
+export interface PublicReportInstanceDetail {
+  key: string;
+  displayName: string;
+  lifecycleState: string;
+  cpuUtilization: number | null;
+  memoryUtilization: number | null;
+}
+
+export interface PublicReportHostStatus {
+  sampledAt: string;
+  cpuUsagePercent: number;
+  loadOne: number;
+  loadFive: number;
+  loadFifteen: number;
+  memoryTotalBytes: number;
+  memoryAvailableBytes: number;
+  memoryUsagePercent: number;
+  swapTotalBytes: number;
+  swapFreeBytes: number;
+  swapUsagePercent: number;
+  diskTotalBytes: number;
+  diskUsableBytes: number;
+  diskUsagePercent: number;
+  networkRxBytes: number;
+  networkTxBytes: number;
+  networkRxBytesPerSecond: number;
+  networkTxBytesPerSecond: number;
+  uptimeSeconds: number;
+  processUptimeSeconds: number;
+  jvmMemoryUsedBytes: number;
+  jvmMemoryMaxBytes: number;
+  jvmThreadCount: number;
+  databaseSizeBytes: number;
+}
+
+export interface PublicReportAlert {
+  key: string;
+  metricName: string;
+  severity: string;
+  title: string;
+  description: string;
+  currentValue: number;
+  threshold: number;
+  unit: string;
+}
+
+export interface PublicReportSyncStatus {
+  status: string;
+  startedAt: string;
+  finishedAt: string;
+  instanceCount: number;
+  metricCount: number;
+  trafficCount: number;
+  costCount: number;
+}
+
+export interface PublicReportPayload {
+  title: string;
+  generatedAt: string;
+  reportDate: string;
+  zoneId: string;
+  instances: {
+    totalCount: number;
+    runningCount: number;
+    stoppedCount: number;
+    otherCount: number;
+    details: PublicReportInstanceDetail[];
+  };
+  host: PublicReportHostStatus | null;
+  alerts: PublicReportAlert[];
+  sync: PublicReportSyncStatus | null;
+  costs: {
+    ociCostThisMonth: number;
+    manualCostThisMonth: number;
+    totalCostThisMonth: number;
+    estimatedMonthEndCost: number;
+    currency: string;
+    daily: Array<{
+      serviceName: string;
+      statDate: string;
+      costAmount: number;
+      currency: string;
+    }>;
+    manualCosts: Array<{
+      key: string;
+      costName: string;
+      category: string;
+      amount: number;
+      currency: string;
+      occurredOn: string;
+    }>;
+  };
+  traffic: {
+    ingressGbThisMonth: number;
+    egressGbThisMonth: number;
+    outboundQuotaGb: number;
+    outboundUsagePercent: number;
+    daily: Array<{
+      statDate: string;
+      ingressGb: number;
+      egressGb: number;
+    }>;
+  };
+}
+
+export interface PublicReportView {
+  id: string;
+  createdAt: string;
+  expiresAt: string;
+  report: PublicReportPayload;
 }
 
 export interface WechatDeliveryResult {

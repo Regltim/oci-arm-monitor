@@ -21,7 +21,11 @@ public class AuthInterceptor implements HandlerInterceptor {
 
   @Override
   public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception {
-    if ("OPTIONS".equalsIgnoreCase(request.getMethod()) || request.getRequestURI().endsWith("/auth/login")) {
+    if (
+      "OPTIONS".equalsIgnoreCase(request.getMethod())
+        || request.getRequestURI().endsWith("/auth/login")
+        || isPublicReportRequest(request)
+    ) {
       return true;
     }
     HttpSession session = request.getSession(false);
@@ -33,5 +37,14 @@ public class AuthInterceptor implements HandlerInterceptor {
     response.setCharacterEncoding("UTF-8");
     response.getWriter().write(objectMapper.writeValueAsString(ApiResponse.fail("未登录或登录已过期")));
     return false;
+  }
+
+  private boolean isPublicReportRequest(HttpServletRequest request) {
+    String requestUri = request.getRequestURI();
+    String contextPath = request.getContextPath();
+    String path = contextPath == null || contextPath.isBlank()
+      ? requestUri
+      : requestUri.substring(Math.min(contextPath.length(), requestUri.length()));
+    return path.startsWith("/public/reports/");
   }
 }

@@ -9,9 +9,14 @@ import java.time.format.DateTimeParseException;
 import java.util.Arrays;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.net.URI;
+import java.net.URISyntaxException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.ociarmmonitor.publicreport.PublicReportService;
 
 @Repository
 public class WechatNotificationSettingsRepository {
@@ -22,19 +27,36 @@ public class WechatNotificationSettingsRepository {
   private final JdbcTemplate jdbcTemplate;
   private final WechatNotificationProperties properties;
   private final WechatSecretCipher secretCipher;
+  private final boolean defaultDetailPageEnabled;
+  private final int defaultDetailPageTokenTtlDays;
+
+  @Autowired
+  public WechatNotificationSettingsRepository(
+    JdbcTemplate jdbcTemplate,
+    WechatNotificationProperties properties,
+    WechatSecretCipher secretCipher,
+    @Value("${monitor.wechat.detail-page-enabled:false}") boolean defaultDetailPageEnabled,
+    @Value("${monitor.wechat.detail-page-token-ttl-days:1}") int defaultDetailPageTokenTtlDays
+  ) {
+    this.jdbcTemplate = jdbcTemplate;
+    this.properties = properties;
+    this.secretCipher = secretCipher;
+    this.defaultDetailPageEnabled = defaultDetailPageEnabled;
+    PublicReportService.validateTtlDays(defaultDetailPageTokenTtlDays);
+    this.defaultDetailPageTokenTtlDays = defaultDetailPageTokenTtlDays;
+  }
 
   public WechatNotificationSettingsRepository(
     JdbcTemplate jdbcTemplate,
     WechatNotificationProperties properties,
     WechatSecretCipher secretCipher
   ) {
-    this.jdbcTemplate = jdbcTemplate;
-    this.properties = properties;
-    this.secretCipher = secretCipher;
+    this(jdbcTemplate, properties, secretCipher, false, 1);
   }
 
   public WechatNotificationSettings resolve() {
     String costTemplateId = resolveCostTemplateId();
+    DetailPageSetting detailPageSetting = resolveDetailPageSetting();
     List<WechatNotificationSettings> settings = jdbcTemplate.query("""
       SELECT enabled, encrypted_app_id, encrypted_app_secret, encrypted_template_id,
         encrypted_open_ids, public_url, immediate_push_enabled, daily_summary_enabled,
@@ -48,13 +70,15 @@ public class WechatNotificationSettingsRepository {
         secretCipher.decrypt(resultSet.getString("encrypted_template_id")),
         costTemplateId,
         parseOpenIds(secretCipher.decrypt(resultSet.getString("encrypted_open_ids"))),
-        normalize(resultSet.getString("public_url")),
+        resolvePublicUrl(resultSet.getString("public_url")),
         resultSet.getInt("immediate_push_enabled") == 1,
         resultSet.getInt("daily_summary_enabled") == 1,
         parseTime(resultSet.getString("daily_summary_time")),
         parseZoneId(resultSet.getString("zone_id")),
         "DATABASE",
-        resultSet.getString("updated_at")
+        resultSet.getString("updated_at"),
+        detailPageSetting.enabled(),
+        detailPageSetting.tokenTtlDays()
       ), DEFAULT_ID);
     return settings.isEmpty() ? environmentSettings() : settings.get(0);
   }
@@ -77,7 +101,11 @@ public class WechatNotificationSettingsRepository {
       settings.dailySummaryTime().format(TIME_FORMATTER),
       settings.zoneId().getId(),
       secretCipher.isReady(),
-      settings.updatedAt()
+      settings.updatedAt(),
+      settings.detailPageEnabled(),
+      detailPageReady(settings),
+      detailPageMissingReason(settings),
+      settings.detailPageTokenTtlDays()
     );
   }
 
@@ -94,9 +122,14 @@ public class WechatNotificationSettingsRepository {
     List<String> openIds = normalize(request.openIds()).isBlank()
       ? current.openIds()
       : parseOpenIds(request.openIds());
-    String publicUrl = storedPublicUrl();
     LocalTime dailySummaryTime = parseTime(request.dailySummaryTime());
     ZoneId zoneId = parseZoneId(request.zoneId());
+    boolean detailPageEnabled = request.detailPageEnabled() == null
+      ? current.detailPageEnabled()
+      : request.detailPageEnabled();
+    int detailPageTokenTtlDays = request.detailPageTokenTtlDays() == null
+      ? current.detailPageTokenTtlDays()
+      : request.detailPageTokenTtlDays();
 
     validate(
       request.enabled(),
@@ -105,7 +138,10 @@ public class WechatNotificationSettingsRepository {
       templateId,
       costTemplateId,
       openIds,
-      request.dailySummaryEnabled()
+      request.dailySummaryEnabled(),
+      detailPageEnabled,
+      detailPageTokenTtlDays,
+      current.publicUrl()
     );
 
     String updatedAt = Instant.now().toString();
@@ -135,7 +171,7 @@ public class WechatNotificationSettingsRepository {
       secretCipher.encrypt(appSecret),
       secretCipher.encrypt(templateId),
       secretCipher.encrypt(String.join(",", openIds)),
-      publicUrl,
+      current.publicUrl(),
       request.immediatePushEnabled() ? 1 : 0,
       request.dailySummaryEnabled() ? 1 : 0,
       dailySummaryTime.format(TIME_FORMATTER),
@@ -151,6 +187,19 @@ public class WechatNotificationSettingsRepository {
       """,
       DEFAULT_ID,
       secretCipher.encrypt(costTemplateId),
+      updatedAt
+    );
+    jdbcTemplate.update("""
+      INSERT INTO wechat_detail_page_setting(id, enabled, token_ttl_days, updated_at)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        enabled = excluded.enabled,
+        token_ttl_days = excluded.token_ttl_days,
+        updated_at = excluded.updated_at
+      """,
+      DEFAULT_ID,
+      detailPageEnabled ? 1 : 0,
+      detailPageTokenTtlDays,
       updatedAt
     );
     return resolve();
@@ -184,7 +233,9 @@ public class WechatNotificationSettingsRepository {
       parseTime(properties.dailySummaryTime()),
       parseZoneId(properties.zoneId()),
       source,
-      ""
+      "",
+      defaultDetailPageEnabled,
+      defaultDetailPageTokenTtlDays
     );
   }
 
@@ -195,7 +246,10 @@ public class WechatNotificationSettingsRepository {
     String templateId,
     String costTemplateId,
     List<String> openIds,
-    boolean dailySummaryEnabled
+    boolean dailySummaryEnabled,
+    boolean detailPageEnabled,
+    int detailPageTokenTtlDays,
+    String publicUrl
   ) {
     if (enabled && (
       appId.isBlank()
@@ -208,6 +262,36 @@ public class WechatNotificationSettingsRepository {
     if (enabled && dailySummaryEnabled && costTemplateId.isBlank()) {
       throw new IllegalArgumentException("启用每日摘要前，请配置费用与流量 Template ID");
     }
+    if (detailPageEnabled && !dailySummaryEnabled) {
+      throw new IllegalArgumentException("启用免登录明细前，请先启用每日摘要");
+    }
+    PublicReportService.validateTtlDays(detailPageTokenTtlDays);
+    if (detailPageEnabled && !isHttpsOrigin(publicUrl)) {
+      throw new IllegalArgumentException("启用免登录明细前，请将 MONITOR_PUBLIC_URL 配置为 HTTPS 地址");
+    }
+  }
+
+  private DetailPageSetting resolveDetailPageSetting() {
+    List<DetailPageSetting> settings = jdbcTemplate.query(
+      "SELECT enabled, token_ttl_days FROM wechat_detail_page_setting WHERE id = ?",
+      (resultSet, rowNum) -> new DetailPageSetting(
+        resultSet.getInt("enabled") == 1,
+        resultSet.getInt("token_ttl_days")
+      ),
+      DEFAULT_ID
+    );
+    return settings.isEmpty()
+      ? new DetailPageSetting(defaultDetailPageEnabled, defaultDetailPageTokenTtlDays)
+      : settings.get(0);
+  }
+
+  private String resolvePublicUrl(String databaseValue) {
+    String environmentValue = normalize(properties.publicUrl());
+    if (!environmentValue.isBlank()) {
+      return environmentValue;
+    }
+    String normalizedDatabaseValue = normalize(databaseValue);
+    return normalizedDatabaseValue;
   }
 
   private String resolveCostTemplateId() {
@@ -225,15 +309,6 @@ public class WechatNotificationSettingsRepository {
     return normalize(properties.costTemplateId());
   }
 
-  private String storedPublicUrl() {
-    List<String> values = jdbcTemplate.query(
-      "SELECT public_url FROM wechat_notification_setting WHERE id = ?",
-      (resultSet, rowNum) -> normalize(resultSet.getString("public_url")),
-      DEFAULT_ID
-    );
-    return values.isEmpty() ? "" : values.get(0);
-  }
-
   private String dailySummaryMissingReason(WechatNotificationSettings settings) {
     if (!settings.configured()) {
       return "公众号基础配置不完整";
@@ -242,6 +317,30 @@ public class WechatNotificationSettingsRepository {
       return "费用与流量模板未配置";
     }
     return "";
+  }
+
+  private boolean detailPageReady(WechatNotificationSettings settings) {
+    return isHttpsOrigin(settings.publicUrl());
+  }
+
+  private String detailPageMissingReason(WechatNotificationSettings settings) {
+    return detailPageReady(settings) ? "" : "MONITOR_PUBLIC_URL 未配置为 HTTPS 地址";
+  }
+
+  private boolean isHttpsOrigin(String value) {
+    try {
+      URI uri = new URI(normalize(value));
+      String path = uri.getRawPath();
+      return "https".equalsIgnoreCase(uri.getScheme())
+        && uri.getHost() != null
+        && !uri.getHost().isBlank()
+        && uri.getUserInfo() == null
+        && (path == null || path.isBlank() || "/".equals(path))
+        && uri.getRawQuery() == null
+        && uri.getRawFragment() == null;
+    } catch (URISyntaxException exception) {
+      return false;
+    }
   }
 
   private LocalTime parseTime(String value) {
@@ -293,5 +392,8 @@ public class WechatNotificationSettingsRepository {
     return normalizedValue.substring(0, 4)
       + "****"
       + normalizedValue.substring(normalizedValue.length() - 4);
+  }
+
+  private record DetailPageSetting(boolean enabled, int tokenTtlDays) {
   }
 }

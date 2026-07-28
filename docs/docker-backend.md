@@ -43,6 +43,7 @@ MONITOR_COOKIE_SECURE=true
 - `MONITOR_WEB_BIND_ADDRESS` 默认固定为回环地址。
 - `MONITOR_WEB_PORT` 是 Nginx/OpenResty 的本机代理目标端口。
 - HTTPS Origin 自动生成 Secure Cookie 配置，但 TLS 仍由外部反向代理处理。
+- 开启微信免登录明细时，`MONITOR_PUBLIC_URL` 也用于生成 H5 Hash 路由；容器不会新增公网端口。
 
 ## 3. 启动与日志
 
@@ -66,7 +67,7 @@ HTTP 响应带 `X-Request-Id`，可在后端日志中定位请求：
 docker compose logs --tail=300 oci-arm-monitor-server | grep '<X-Request-Id>'
 ```
 
-服务端不会记录请求体、Cookie、密码、Token 或 OCI 私钥内容。
+服务端不会记录请求体、Cookie、密码、Token 或 OCI 私钥内容。微信明细令牌位于 URL Fragment，读取快照时通过 `Authorization` 传递，不会进入请求 URI 日志。
 
 ## 4. 端口和网络
 

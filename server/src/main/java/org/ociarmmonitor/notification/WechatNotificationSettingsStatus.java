@@ -16,6 +16,10 @@ public record WechatNotificationSettingsStatus(
   String dailySummaryTime,
   String zoneId,
   boolean encryptionReady,
-  String updatedAt
+  String updatedAt,
+  boolean detailPageEnabled,
+  boolean detailPageReady,
+  String detailPageMissingReason,
+  int detailPageTokenTtlDays
 ) {
 }

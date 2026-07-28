@@ -56,15 +56,26 @@ public class WechatApiClient implements WechatTemplateSender {
     WechatTemplateType templateType,
     WechatTemplateMessage message
   ) {
+    sendTemplate(settings, openId, templateType, message, "");
+  }
+
+  @Override
+  public void sendTemplate(
+    WechatNotificationSettings settings,
+    String openId,
+    WechatTemplateType templateType,
+    WechatTemplateMessage message,
+    String detailUrl
+  ) {
     String accessToken = accessToken(settings, false);
     try {
-      sendTemplateRequest(settings, openId, templateType, message, accessToken);
+      sendTemplateRequest(settings, openId, templateType, message, detailUrl, accessToken);
     } catch (WechatApiException exception) {
       if (!isExpiredTokenError(exception.errorCode())) {
         throw exception;
       }
       invalidateToken(accessToken);
-      sendTemplateRequest(settings, openId, templateType, message, accessToken(settings, true));
+      sendTemplateRequest(settings, openId, templateType, message, detailUrl, accessToken(settings, true));
     }
   }
 
@@ -109,6 +120,7 @@ public class WechatApiClient implements WechatTemplateSender {
     String openId,
     WechatTemplateType templateType,
     WechatTemplateMessage message,
+    String detailUrl,
     String accessToken
   ) {
     String configuredTemplateId = templateId(settings, templateType);
@@ -121,7 +133,7 @@ public class WechatApiClient implements WechatTemplateSender {
     String requestBody;
     try {
       requestBody = objectMapper.writeValueAsString(
-        templatePayload(openId, configuredTemplateId, fieldNames, message)
+        templatePayload(openId, configuredTemplateId, fieldNames, message, detailUrl)
       );
     } catch (JsonProcessingException exception) {
       throw new WechatApiException("微信公众号模板消息生成失败", exception);
@@ -146,7 +158,8 @@ public class WechatApiClient implements WechatTemplateSender {
     String openId,
     String configuredTemplateId,
     List<String> fieldNames,
-    WechatTemplateMessage message
+    WechatTemplateMessage message,
+    String detailUrl
   ) {
     Map<String, Object> data = new LinkedHashMap<>();
     List<String> values = new ArrayList<>(REQUIRED_TEMPLATE_FIELD_COUNT);
@@ -161,6 +174,9 @@ public class WechatApiClient implements WechatTemplateSender {
     Map<String, Object> payload = new LinkedHashMap<>();
     payload.put("touser", openId);
     payload.put("template_id", configuredTemplateId);
+    if (detailUrl != null && !detailUrl.isBlank()) {
+      payload.put("url", detailUrl);
+    }
     payload.put("data", data);
     return payload;
   }
