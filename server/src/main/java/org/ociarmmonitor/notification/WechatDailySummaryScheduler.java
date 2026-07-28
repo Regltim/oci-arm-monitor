@@ -3,12 +3,7 @@ package org.ociarmmonitor.notification;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZonedDateTime;
-import java.util.List;
-import org.ociarmmonitor.oci.SyncRunRepository;
-import org.ociarmmonitor.serverstatus.ServerAlert;
-import org.ociarmmonitor.serverstatus.ServerAlertService;
-import org.ociarmmonitor.serverstatus.ServerStatusRepository;
-import org.ociarmmonitor.serverstatus.ServerStatusSnapshot;
+import java.util.function.Supplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -19,12 +14,12 @@ import org.springframework.stereotype.Component;
 public class WechatDailySummaryScheduler {
 
   private static final Logger LOGGER = LoggerFactory.getLogger(WechatDailySummaryScheduler.class);
+  private static final String STATUS_REPORT = "STATUS";
+  private static final String COST_TRAFFIC_REPORT = "COST_TRAFFIC";
 
   private final WechatNotificationSettingsRepository settingsRepository;
   private final WechatDailySummaryStateRepository stateRepository;
-  private final ServerStatusRepository serverStatusRepository;
-  private final ServerAlertService serverAlertService;
-  private final SyncRunRepository syncRunRepository;
+  private final DailyReportDataProvider dataProvider;
   private final WechatNotificationService notificationService;
   private final WechatDeliveryLogRepository deliveryLogRepository;
   private final Clock clock;
@@ -33,18 +28,14 @@ public class WechatDailySummaryScheduler {
   public WechatDailySummaryScheduler(
     WechatNotificationSettingsRepository settingsRepository,
     WechatDailySummaryStateRepository stateRepository,
-    ServerStatusRepository serverStatusRepository,
-    ServerAlertService serverAlertService,
-    SyncRunRepository syncRunRepository,
+    DailyReportDataProvider dataProvider,
     WechatNotificationService notificationService,
     WechatDeliveryLogRepository deliveryLogRepository
   ) {
     this(
       settingsRepository,
       stateRepository,
-      serverStatusRepository,
-      serverAlertService,
-      syncRunRepository,
+      dataProvider,
       notificationService,
       deliveryLogRepository,
       Clock.systemUTC()
@@ -54,18 +45,14 @@ public class WechatDailySummaryScheduler {
   WechatDailySummaryScheduler(
     WechatNotificationSettingsRepository settingsRepository,
     WechatDailySummaryStateRepository stateRepository,
-    ServerStatusRepository serverStatusRepository,
-    ServerAlertService serverAlertService,
-    SyncRunRepository syncRunRepository,
+    DailyReportDataProvider dataProvider,
     WechatNotificationService notificationService,
     WechatDeliveryLogRepository deliveryLogRepository,
     Clock clock
   ) {
     this.settingsRepository = settingsRepository;
     this.stateRepository = stateRepository;
-    this.serverStatusRepository = serverStatusRepository;
-    this.serverAlertService = serverAlertService;
-    this.syncRunRepository = syncRunRepository;
+    this.dataProvider = dataProvider;
     this.notificationService = notificationService;
     this.deliveryLogRepository = deliveryLogRepository;
     this.clock = clock;
@@ -76,52 +63,74 @@ public class WechatDailySummaryScheduler {
     try {
       checkDueSummaryInternal();
     } catch (RuntimeException exception) {
-      LOGGER.warn("Wechat daily summary check failed: {}", exception.getMessage());
+      LOGGER.warn("微信公众号日报检查失败，请查看服务诊断日志");
     }
   }
 
   private void checkDueSummaryInternal() {
     WechatNotificationSettings settings = settingsRepository.resolve();
-    if (!settings.enabled() || !settings.configured() || !settings.dailySummaryEnabled()) {
+    if (!settings.enabled() || !settings.dailySummaryConfigured() || !settings.dailySummaryEnabled()) {
       return;
     }
-    ZonedDateTime localNow = ZonedDateTime.ofInstant(clock.instant(), settings.zoneId());
+    DailyReportContext context = DailyReportContext.from(clock, settings.zoneId());
+    ZonedDateTime localNow = context.reportAt().atZone(settings.zoneId());
     if (localNow.toLocalTime().isBefore(settings.dailySummaryTime())) {
       return;
     }
-    String localDate = localNow.toLocalDate().toString();
-    if (stateRepository.lastAttemptedDate().filter(localDate::equals).isPresent()) {
-      return;
-    }
 
+    DailyReportData data = dataProvider.load(context);
+    attemptReport(
+      STATUS_REPORT,
+      "DAILY_STATUS",
+      context,
+      settings,
+      () -> notificationService.sendDailyStatus(data)
+    );
+    attemptReport(
+      COST_TRAFFIC_REPORT,
+      "DAILY_COST_TRAFFIC",
+      context,
+      settings,
+      () -> notificationService.sendDailyCostTraffic(data)
+    );
+  }
+
+  private void attemptReport(
+    String reportType,
+    String notificationType,
+    DailyReportContext context,
+    WechatNotificationSettings settings,
+    Supplier<WechatDeliveryResult> delivery
+  ) {
     String attemptedAt = Instant.now(clock).toString();
-    stateRepository.markAttempted(localNow.toLocalDate(), attemptedAt);
-    ServerStatusSnapshot snapshot = serverStatusRepository.latest().orElse(null);
-    if (snapshot == null) {
-      deliveryLogRepository.save(new WechatDeliveryResult(
-        "DAILY_SUMMARY",
-        "",
-        0,
-        settings.openIds().size(),
-        "暂无服务器状态采样数据",
-        attemptedAt
-      ));
+    try {
+      if (!stateRepository.tryClaim(reportType, context.localDate(), attemptedAt)) {
+        return;
+      }
+    } catch (RuntimeException exception) {
+      LOGGER.warn("微信公众号日报发送资格抢占失败：{}", reportType);
       return;
     }
 
     try {
-      List<ServerAlert> alerts = serverAlertService.evaluate(snapshot, syncRunRepository.latest());
-      double syncAgeHours = serverAlertService.syncAgeHours(syncRunRepository.latest());
-      deliveryLogRepository.save(notificationService.sendDailySummary(snapshot, alerts, syncAgeHours));
+      deliveryLogRepository.save(delivery.get());
     } catch (RuntimeException exception) {
+      saveFailure(notificationType, settings.openIds().size(), attemptedAt);
+    }
+  }
+
+  private void saveFailure(String notificationType, int recipientCount, String attemptedAt) {
+    try {
       deliveryLogRepository.save(new WechatDeliveryResult(
-        "DAILY_SUMMARY",
+        notificationType,
         "",
         0,
-        settings.openIds().size(),
+        recipientCount,
         "发送失败，请检查公众号配置和服务日志",
         attemptedAt
       ));
+    } catch (RuntimeException exception) {
+      LOGGER.warn("微信公众号日报投递结果保存失败：{}", notificationType);
     }
   }
 }

@@ -186,8 +186,10 @@ export interface WechatNotificationSettingsStatus {
   appIdMasked: string;
   appSecretConfigured: boolean;
   templateIdMasked: string;
+  costTemplateIdMasked: string;
   recipientCount: number;
-  publicUrl: string;
+  dailySummaryConfigured: boolean;
+  dailySummaryMissingReason: string;
   immediatePushEnabled: boolean;
   dailySummaryEnabled: boolean;
   dailySummaryTime: string;
@@ -201,8 +203,8 @@ export interface WechatNotificationSettingsUpdateRequest {
   appId?: string;
   appSecret?: string;
   templateId?: string;
+  costTemplateId?: string;
   openIds?: string;
-  publicUrl: string;
   immediatePushEnabled: boolean;
   dailySummaryEnabled: boolean;
   dailySummaryTime: string;
@@ -210,12 +212,29 @@ export interface WechatNotificationSettingsUpdateRequest {
 }
 
 export interface WechatDeliveryResult {
-  notificationType: 'TEST' | 'ALERT' | 'RECOVERY' | 'DAILY_SUMMARY' | 'ALERT_TRANSITION';
+  notificationType:
+    | 'TEST'
+    | 'TEST_STATUS'
+    | 'TEST_COST_TRAFFIC'
+    | 'ALERT'
+    | 'RECOVERY'
+    | 'DAILY_SUMMARY'
+    | 'DAILY_STATUS'
+    | 'DAILY_COST_TRAFFIC'
+    | 'ALERT_TRANSITION';
   metricName: string;
   successCount: number;
   failureCount: number;
   message: string;
   createdAt: string;
+}
+
+export interface WechatTestDeliveryResult {
+  status: WechatDeliveryResult;
+  costTraffic: WechatDeliveryResult;
+  successCount: number;
+  failureCount: number;
+  message: string;
 }
 
 export interface SyncResult {

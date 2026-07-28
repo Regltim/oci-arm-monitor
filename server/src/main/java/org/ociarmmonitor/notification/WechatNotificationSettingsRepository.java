@@ -1,6 +1,5 @@
 package org.ociarmmonitor.notification;
 
-import java.net.URI;
 import java.time.DateTimeException;
 import java.time.Instant;
 import java.time.LocalTime;
@@ -12,6 +11,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 @Repository
 public class WechatNotificationSettingsRepository {
@@ -34,6 +34,7 @@ public class WechatNotificationSettingsRepository {
   }
 
   public WechatNotificationSettings resolve() {
+    String costTemplateId = resolveCostTemplateId();
     List<WechatNotificationSettings> settings = jdbcTemplate.query("""
       SELECT enabled, encrypted_app_id, encrypted_app_secret, encrypted_template_id,
         encrypted_open_ids, public_url, immediate_push_enabled, daily_summary_enabled,
@@ -45,6 +46,7 @@ public class WechatNotificationSettingsRepository {
         secretCipher.decrypt(resultSet.getString("encrypted_app_id")),
         secretCipher.decrypt(resultSet.getString("encrypted_app_secret")),
         secretCipher.decrypt(resultSet.getString("encrypted_template_id")),
+        costTemplateId,
         parseOpenIds(secretCipher.decrypt(resultSet.getString("encrypted_open_ids"))),
         normalize(resultSet.getString("public_url")),
         resultSet.getInt("immediate_push_enabled") == 1,
@@ -66,8 +68,10 @@ public class WechatNotificationSettingsRepository {
       mask(settings.appId()),
       !settings.appSecret().isBlank(),
       mask(settings.templateId()),
+      mask(settings.costTemplateId()),
       settings.openIds().size(),
-      settings.publicUrl(),
+      settings.dailySummaryConfigured(),
+      dailySummaryMissingReason(settings),
       settings.immediatePushEnabled(),
       settings.dailySummaryEnabled(),
       settings.dailySummaryTime().format(TIME_FORMATTER),
@@ -77,6 +81,7 @@ public class WechatNotificationSettingsRepository {
     );
   }
 
+  @Transactional
   public WechatNotificationSettings update(WechatNotificationSettingsUpdateRequest request) {
     if (!secretCipher.isReady()) {
       throw new IllegalArgumentException("未配置 MONITOR_SETTINGS_ENCRYPTION_KEY，无法保存公众号配置");
@@ -85,10 +90,11 @@ public class WechatNotificationSettingsRepository {
     String appId = preserveBlank(request.appId(), current.appId());
     String appSecret = preserveBlank(request.appSecret(), current.appSecret());
     String templateId = preserveBlank(request.templateId(), current.templateId());
+    String costTemplateId = preserveBlank(request.costTemplateId(), current.costTemplateId());
     List<String> openIds = normalize(request.openIds()).isBlank()
       ? current.openIds()
       : parseOpenIds(request.openIds());
-    String publicUrl = normalize(request.publicUrl());
+    String publicUrl = storedPublicUrl();
     LocalTime dailySummaryTime = parseTime(request.dailySummaryTime());
     ZoneId zoneId = parseZoneId(request.zoneId());
 
@@ -97,8 +103,9 @@ public class WechatNotificationSettingsRepository {
       appId,
       appSecret,
       templateId,
+      costTemplateId,
       openIds,
-      publicUrl
+      request.dailySummaryEnabled()
     );
 
     String updatedAt = Instant.now().toString();
@@ -135,6 +142,17 @@ public class WechatNotificationSettingsRepository {
       zoneId.getId(),
       updatedAt
     );
+    jdbcTemplate.update("""
+      INSERT INTO wechat_cost_template_setting(id, encrypted_template_id, updated_at)
+      VALUES (?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        encrypted_template_id = excluded.encrypted_template_id,
+        updated_at = excluded.updated_at
+      """,
+      DEFAULT_ID,
+      secretCipher.encrypt(costTemplateId),
+      updatedAt
+    );
     return resolve();
   }
 
@@ -142,12 +160,14 @@ public class WechatNotificationSettingsRepository {
     String appId = normalize(properties.appId());
     String appSecret = normalize(properties.appSecret());
     String templateId = normalize(properties.templateId());
+    String costTemplateId = normalize(properties.costTemplateId());
     List<String> openIds = parseOpenIds(properties.openIds());
     String publicUrl = normalize(properties.publicUrl());
     String source = properties.enabled()
       || !appId.isBlank()
       || !appSecret.isBlank()
       || !templateId.isBlank()
+      || !costTemplateId.isBlank()
       || !openIds.isEmpty()
       ? "ENVIRONMENT"
       : "NONE";
@@ -156,6 +176,7 @@ public class WechatNotificationSettingsRepository {
       appId,
       appSecret,
       templateId,
+      costTemplateId,
       openIds,
       publicUrl,
       properties.immediatePushEnabled(),
@@ -172,33 +193,55 @@ public class WechatNotificationSettingsRepository {
     String appId,
     String appSecret,
     String templateId,
+    String costTemplateId,
     List<String> openIds,
-    String publicUrl
+    boolean dailySummaryEnabled
   ) {
     if (enabled && (
       appId.isBlank()
         || appSecret.isBlank()
         || templateId.isBlank()
         || openIds.isEmpty()
-        || publicUrl.isBlank()
     )) {
-      throw new IllegalArgumentException("启用微信公众号通知前，请完整填写 AppID、AppSecret、Template ID、接收人 OpenID 和面板地址");
+      throw new IllegalArgumentException("启用微信公众号通知前，请完整填写 AppID、AppSecret、运行状态 Template ID 和接收人 OpenID");
     }
-    if (!publicUrl.isBlank()) {
-      validatePublicUrl(publicUrl);
+    if (enabled && dailySummaryEnabled && costTemplateId.isBlank()) {
+      throw new IllegalArgumentException("启用每日摘要前，请配置费用与流量 Template ID");
     }
   }
 
-  private void validatePublicUrl(String publicUrl) {
-    try {
-      URI uri = URI.create(publicUrl);
-      if (!("http".equalsIgnoreCase(uri.getScheme()) || "https".equalsIgnoreCase(uri.getScheme()))
-        || uri.getHost() == null) {
-        throw new IllegalArgumentException("面板地址必须是有效的 HTTP 或 HTTPS 地址");
+  private String resolveCostTemplateId() {
+    List<String> encryptedValues = jdbcTemplate.query(
+      "SELECT encrypted_template_id FROM wechat_cost_template_setting WHERE id = ?",
+      (resultSet, rowNum) -> resultSet.getString("encrypted_template_id"),
+      DEFAULT_ID
+    );
+    if (!encryptedValues.isEmpty()) {
+      String databaseValue = normalize(secretCipher.decrypt(encryptedValues.get(0)));
+      if (!databaseValue.isBlank()) {
+        return databaseValue;
       }
-    } catch (IllegalArgumentException exception) {
-      throw new IllegalArgumentException("面板地址必须是有效的 HTTP 或 HTTPS 地址");
     }
+    return normalize(properties.costTemplateId());
+  }
+
+  private String storedPublicUrl() {
+    List<String> values = jdbcTemplate.query(
+      "SELECT public_url FROM wechat_notification_setting WHERE id = ?",
+      (resultSet, rowNum) -> normalize(resultSet.getString("public_url")),
+      DEFAULT_ID
+    );
+    return values.isEmpty() ? "" : values.get(0);
+  }
+
+  private String dailySummaryMissingReason(WechatNotificationSettings settings) {
+    if (!settings.configured()) {
+      return "公众号基础配置不完整";
+    }
+    if (settings.costTemplateId().isBlank()) {
+      return "费用与流量模板未配置";
+    }
+    return "";
   }
 
   private LocalTime parseTime(String value) {

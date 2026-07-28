@@ -8,7 +8,7 @@ OCI ARM Monitor 是一个可自托管的 Oracle Cloud Infrastructure 资源监�
 - CPU、内存、磁盘、运行时间和流量监控
 - 免费额度与费用汇总
 - OCI 连接诊断和定时同步
-- 微信公众号告警、恢复和每日状态摘要
+- 微信公众号告警、恢复，以及运行状态和费用流量双日报
 - Instance Principal 和 API Key 两种认证方式
 - 前端、后端和 SQLite 一体化 Docker Compose 部署
 

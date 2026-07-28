@@ -55,22 +55,25 @@ class WechatApiClientTest {
     server.start();
     WechatApiClient client = client();
 
-    client.sendTemplate(settings(), "openid_example_1", message());
-    client.sendTemplate(settings(), "openid_example_2", message());
+    client.sendTemplate(settings(), "openid_example_1", WechatTemplateType.STATUS, message());
+    client.sendTemplate(settings(), "openid_example_2", WechatTemplateType.COST_TRAFFIC, message());
 
     assertThat(tokenRequests).hasValue(1);
     assertThat(messageRequests).hasValue(2);
     JsonNode payload = objectMapper.readTree(messageBodies.get(0));
     assertThat(payload.path("touser").asText()).isEqualTo("openid_example_1");
-    assertThat(payload.path("template_id").asText()).isEqualTo("template_example_01");
-    assertThat(payload.path("url").asText()).isEqualTo("https://monitor.example.com");
+    assertThat(payload.path("template_id").asText()).isEqualTo("template_example_status");
+    assertThat(payload.has("url")).isFalse();
+    assertThat(payload.has("miniprogram")).isFalse();
+    JsonNode costPayload = objectMapper.readTree(messageBodies.get(1));
+    assertThat(costPayload.path("template_id").asText()).isEqualTo("template_example_cost");
     assertThat(payload.path("data").path("first").path("value").asText()).isEqualTo("OCI ARM Monitor 测试通知");
     assertThat(payload.path("data").path("level").path("value").asText()).isEqualTo("信息");
     assertThat(payload.path("data").path("metric").path("value").asText()).isEqualTo("通知通道");
     assertThat(payload.path("data").path("status").path("value").asText()).isEqualTo("测试成功");
     assertThat(payload.path("data").path("content").path("value").asText()).isEqualTo("公众号模板消息配置有效。");
     assertThat(payload.path("data").path("time").path("value").asText()).isEqualTo("2026-07-27 09:00:00");
-    assertThat(payload.path("data").path("remark").path("value").asText()).isEqualTo("点击查看监控面板");
+    assertThat(payload.path("data").path("remark").path("value").asText()).isEqualTo("本消息仅用于验证公众号模板");
   }
 
   @Test
@@ -84,8 +87,8 @@ class WechatApiClientTest {
     server.start();
     WechatApiClient client = client();
 
-    client.sendTemplate(settings(), "openid_example_1", message());
-    client.sendTemplate(settings("wx_another_app_id"), "openid_example_2", message());
+    client.sendTemplate(settings(), "openid_example_1", WechatTemplateType.STATUS, message());
+    client.sendTemplate(settings("wx_another_app_id"), "openid_example_2", WechatTemplateType.STATUS, message());
 
     assertThat(tokenRequests).hasValue(2);
   }
@@ -106,7 +109,7 @@ class WechatApiClientTest {
     });
     server.start();
 
-    client().sendTemplate(settings(), "openid_example_1", message());
+    client().sendTemplate(settings(), "openid_example_1", WechatTemplateType.STATUS, message());
 
     assertThat(tokenRequests).hasValue(2);
     assertThat(messageRequests).hasValue(2);
@@ -117,12 +120,18 @@ class WechatApiClientTest {
     server.createContext("/cgi-bin/token", exchange ->
       respond(exchange, 200, "{\"access_token\":\"access-token-1\",\"expires_in\":7200}"));
     server.createContext("/cgi-bin/message/template/send", exchange ->
-      respond(exchange, 200, "{\"errcode\":40003,\"errmsg\":\"invalid openid\"}"));
+      respond(exchange, 200, "{\"errcode\":40003,\"errmsg\":\"invalid template_example_status template_example_cost openid_example_1\"}"));
     server.start();
 
-    assertThatThrownBy(() -> client().sendTemplate(settings(), "openid_example_1", message()))
+    assertThatThrownBy(() -> client().sendTemplate(
+      settings(),
+      "openid_example_1",
+      WechatTemplateType.STATUS,
+      message()
+    ))
       .isInstanceOf(WechatApiException.class)
-      .hasMessage("微信模板消息发送失败，错误码 40003：invalid openid")
+      .hasMessageNotContaining("template_example_status")
+      .hasMessageNotContaining("template_example_cost")
       .hasMessageNotContaining("wx_example_secret")
       .hasMessageNotContaining("openid_example_1");
   }
@@ -132,7 +141,12 @@ class WechatApiClientTest {
     server.createContext("/cgi-bin/token", exchange -> respond(exchange, 503, "temporarily unavailable"));
     server.start();
 
-    assertThatThrownBy(() -> client().sendTemplate(settings(), "openid_example_1", message()))
+    assertThatThrownBy(() -> client().sendTemplate(
+      settings(),
+      "openid_example_1",
+      WechatTemplateType.STATUS,
+      message()
+    ))
       .isInstanceOf(WechatApiException.class)
       .hasMessage("微信接口请求失败，HTTP 状态码 503");
 
@@ -142,7 +156,12 @@ class WechatApiClientTest {
     server.createContext("/cgi-bin/token", exchange -> respond(exchange, 200, "not-json"));
     server.start();
 
-    assertThatThrownBy(() -> client().sendTemplate(settings(), "openid_example_1", message()))
+    assertThatThrownBy(() -> client().sendTemplate(
+      settings(),
+      "openid_example_1",
+      WechatTemplateType.STATUS,
+      message()
+    ))
       .isInstanceOf(WechatApiException.class)
       .hasMessage("微信接口返回了无法解析的数据");
   }
@@ -156,13 +175,13 @@ class WechatApiClientTest {
       true,
       "wx_example_app_id",
       "wx_example_secret",
-      "template_example_01",
+      "template_example_status",
+      "template_example_cost",
       "openid_example_1",
       true,
       false,
       "09:00",
       "Asia/Shanghai",
-      "https://monitor.example.com",
       apiBaseUrl
     );
   }
@@ -176,9 +195,10 @@ class WechatApiClientTest {
       true,
       appId,
       "wx_example_secret",
-      "template_example_01",
+      "template_example_status",
+      "template_example_cost",
       List.of("openid_example_1"),
-      "https://monitor.example.com",
+      "",
       true,
       false,
       LocalTime.of(9, 0),
@@ -196,7 +216,7 @@ class WechatApiClientTest {
       "测试成功",
       "公众号模板消息配置有效。",
       "2026-07-27 09:00:00",
-      "点击查看监控面板"
+      "本消息仅用于验证公众号模板"
     );
   }
 

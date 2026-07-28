@@ -10,9 +10,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.nio.charset.StandardCharsets;
-import java.time.Clock;
 import java.time.Instant;
-import java.time.ZoneOffset;
 import java.util.Base64;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -25,6 +23,7 @@ import org.ociarmmonitor.notification.WechatNotificationSettingsRepository;
 import org.ociarmmonitor.notification.WechatSecretCipher;
 import org.ociarmmonitor.notification.WechatTemplateMessage;
 import org.ociarmmonitor.notification.WechatTemplateSender;
+import org.ociarmmonitor.notification.WechatTemplateType;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.SingleConnectionDataSource;
@@ -46,37 +45,7 @@ class WechatNotificationControllerTest {
 
   @BeforeEach
   void setUp() {
-    SingleConnectionDataSource dataSource = new SingleConnectionDataSource("jdbc:sqlite::memory:", true);
-    new ResourceDatabasePopulator(new ClassPathResource("schema.sql")).execute(dataSource);
-    JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
-    WechatNotificationSettingsRepository settingsRepository = new WechatNotificationSettingsRepository(
-      jdbcTemplate,
-      properties(),
-      new WechatSecretCipher(VALID_KEY)
-    );
-    WechatTemplateSender templateSender = new WechatTemplateSender() {
-      @Override
-      public void sendTemplate(
-        org.ociarmmonitor.notification.WechatNotificationSettings settings,
-        String openId,
-        WechatTemplateMessage message
-      ) {
-        sentMessages++;
-      }
-    };
-    WechatNotificationService notificationService = new WechatNotificationService(
-      settingsRepository,
-      templateSender
-    );
-    deliveryLogRepository = new WechatDeliveryLogRepository(jdbcTemplate);
-    WechatNotificationController controller = new WechatNotificationController(
-      settingsRepository,
-      notificationService,
-      deliveryLogRepository
-    );
-    mockMvc = MockMvcBuilders.standaloneSetup(controller)
-      .setControllerAdvice(new GlobalExceptionHandler())
-      .build();
+    configure(properties(true, "template_example_cost"));
   }
 
   @Test
@@ -87,6 +56,8 @@ class WechatNotificationControllerTest {
       .andExpect(jsonPath("$.data.configured").value(true))
       .andExpect(jsonPath("$.data.appIdMasked").value("wx_e****p_id"))
       .andExpect(jsonPath("$.data.appSecretConfigured").value(true))
+      .andExpect(jsonPath("$.data.costTemplateIdMasked").value("temp****cost"))
+      .andExpect(jsonPath("$.data.dailySummaryConfigured").value(true))
       .andExpect(jsonPath("$.data.recipientCount").value(2))
       .andReturn();
 
@@ -95,7 +66,8 @@ class WechatNotificationControllerTest {
       .doesNotContain("wx_example_secret")
       .doesNotContain("openid_example_1")
       .doesNotContain("openIds")
-      .doesNotContain("appSecret\"");
+      .doesNotContain("appSecret\"")
+      .doesNotContain("publicUrl");
   }
 
   @Test
@@ -106,8 +78,8 @@ class WechatNotificationControllerTest {
         "appId": "wx_database_app",
         "appSecret": "database-secret",
         "templateId": "database-template",
+        "costTemplateId": "database-cost-template",
         "openIds": "openid_database_1,openid_database_2",
-        "publicUrl": "https://dashboard.example.com",
         "immediatePushEnabled": false,
         "dailySummaryEnabled": true,
         "dailySummaryTime": "21:30",
@@ -132,14 +104,57 @@ class WechatNotificationControllerTest {
   }
 
   @Test
-  void sendsManualTestAndRecordsSanitizedDelivery() throws Exception {
+  void sendsBothManualTestsAndRecordsSeparateSanitizedDeliveries() throws Exception {
+    MvcResult mvcResult = mockMvc.perform(post("/settings/wechat/test"))
+      .andExpect(status().isOk())
+      .andExpect(jsonPath("$.data.status.notificationType").value("TEST_STATUS"))
+      .andExpect(jsonPath("$.data.status.successCount").value(2))
+      .andExpect(jsonPath("$.data.costTraffic.notificationType").value("TEST_COST_TRAFFIC"))
+      .andExpect(jsonPath("$.data.costTraffic.successCount").value(2))
+      .andExpect(jsonPath("$.data.successCount").value(4))
+      .andExpect(jsonPath("$.data.failureCount").value(0))
+      .andReturn();
+
+    assertThat(sentMessages).isEqualTo(4);
+    assertThat(deliveryLogRepository.listRecent(20)).extracting(WechatDeliveryResult::notificationType)
+      .containsExactly("TEST_COST_TRAFFIC", "TEST_STATUS");
+    String body = mvcResult.getResponse().getContentAsString(StandardCharsets.UTF_8);
+    assertThat(body)
+      .doesNotContain("wx_example_secret")
+      .doesNotContain("openid_example_1")
+      .doesNotContain("template_example_status")
+      .doesNotContain("template_example_cost");
+  }
+
+  @Test
+  void returnsPartialSuccessWhenCostTemplateIsMissing() throws Exception {
+    configure(properties(true, ""));
+
     mockMvc.perform(post("/settings/wechat/test"))
       .andExpect(status().isOk())
+      .andExpect(jsonPath("$.data.status.successCount").value(2))
+      .andExpect(jsonPath("$.data.status.failureCount").value(0))
+      .andExpect(jsonPath("$.data.costTraffic.successCount").value(0))
+      .andExpect(jsonPath("$.data.costTraffic.failureCount").value(2))
+      .andExpect(jsonPath("$.data.costTraffic.message").value("费用与流量模板未配置"))
       .andExpect(jsonPath("$.data.successCount").value(2))
-      .andExpect(jsonPath("$.data.failureCount").value(0));
+      .andExpect(jsonPath("$.data.failureCount").value(2));
 
     assertThat(sentMessages).isEqualTo(2);
-    assertThat(deliveryLogRepository.listRecent(20)).hasSize(1);
+    assertThat(deliveryLogRepository.listRecent(20)).extracting(WechatDeliveryResult::notificationType)
+      .containsExactly("TEST_COST_TRAFFIC", "TEST_STATUS");
+  }
+
+  @Test
+  void rejectsManualTestWhenBaseConfigurationIsUnavailable() throws Exception {
+    configure(properties(false, "template_example_cost"));
+
+    mockMvc.perform(post("/settings/wechat/test"))
+      .andExpect(status().isBadRequest())
+      .andExpect(jsonPath("$.message").value("微信公众号通知尚未启用"));
+
+    assertThat(sentMessages).isZero();
+    assertThat(deliveryLogRepository.listRecent(20)).isEmpty();
   }
 
   @Test
@@ -150,8 +165,8 @@ class WechatNotificationControllerTest {
         "appId": "",
         "appSecret": "",
         "templateId": "",
+        "costTemplateId": "",
         "openIds": "",
-        "publicUrl": "https://monitor.example.com",
         "immediatePushEnabled": true,
         "dailySummaryEnabled": true,
         "dailySummaryTime": "25:00",
@@ -166,7 +181,7 @@ class WechatNotificationControllerTest {
 
     for (int index = 0; index < 25; index++) {
       deliveryLogRepository.save(new WechatDeliveryResult(
-        "TEST",
+        "TEST_STATUS",
         "",
         1,
         0,
@@ -181,18 +196,54 @@ class WechatNotificationControllerTest {
     assertThat(response.path("data").size()).isEqualTo(20);
   }
 
-  private WechatNotificationProperties properties() {
+  private void configure(WechatNotificationProperties properties) {
+    SingleConnectionDataSource dataSource = new SingleConnectionDataSource("jdbc:sqlite::memory:", true);
+    new ResourceDatabasePopulator(new ClassPathResource("schema.sql")).execute(dataSource);
+    JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
+    WechatNotificationSettingsRepository settingsRepository = new WechatNotificationSettingsRepository(
+      jdbcTemplate,
+      properties,
+      new WechatSecretCipher(VALID_KEY)
+    );
+    WechatTemplateSender templateSender = new WechatTemplateSender() {
+      @Override
+      public void sendTemplate(
+        org.ociarmmonitor.notification.WechatNotificationSettings settings,
+        String openId,
+        WechatTemplateType templateType,
+        WechatTemplateMessage message
+      ) {
+        sentMessages++;
+      }
+    };
+    WechatNotificationService notificationService = new WechatNotificationService(
+      settingsRepository,
+      templateSender
+    );
+    deliveryLogRepository = new WechatDeliveryLogRepository(jdbcTemplate);
+    WechatNotificationController controller = new WechatNotificationController(
+      settingsRepository,
+      notificationService,
+      deliveryLogRepository
+    );
+    sentMessages = 0;
+    mockMvc = MockMvcBuilders.standaloneSetup(controller)
+      .setControllerAdvice(new GlobalExceptionHandler())
+      .build();
+  }
+
+  private WechatNotificationProperties properties(boolean enabled, String costTemplateId) {
     return new WechatNotificationProperties(
-      true,
+      enabled,
       "wx_example_app_id",
       "wx_example_secret",
-      "template_example_01",
+      "template_example_status",
+      costTemplateId,
       "openid_example_1,openid_example_2",
       true,
       false,
       "09:00",
       "Asia/Shanghai",
-      "https://monitor.example.com",
       "https://api.weixin.qq.com"
     );
   }

@@ -278,6 +278,7 @@ collect_wechat_settings() {
   MONITOR_WECHAT_APP_ID="$(read_env_value MONITOR_WECHAT_APP_ID || true)"
   MONITOR_WECHAT_APP_SECRET="$(read_env_value MONITOR_WECHAT_APP_SECRET || true)"
   MONITOR_WECHAT_TEMPLATE_ID="$(read_env_value MONITOR_WECHAT_TEMPLATE_ID || true)"
+  MONITOR_WECHAT_COST_TEMPLATE_ID="$(read_env_value MONITOR_WECHAT_COST_TEMPLATE_ID || true)"
   MONITOR_WECHAT_OPEN_IDS="$(read_env_value MONITOR_WECHAT_OPEN_IDS || true)"
   enabled_default="$(read_env_value MONITOR_WECHAT_ENABLED || true)"
   immediate_default="$(read_env_value MONITOR_WECHAT_IMMEDIATE_PUSH_ENABLED || true)"
@@ -312,7 +313,8 @@ collect_wechat_settings() {
 
   ask_with_hidden_default MONITOR_WECHAT_APP_ID "微信公众号 AppID" "${MONITOR_WECHAT_APP_ID}" true
   ask_secret MONITOR_WECHAT_APP_SECRET "微信公众号 AppSecret" "${MONITOR_WECHAT_APP_SECRET}" true
-  ask_with_hidden_default MONITOR_WECHAT_TEMPLATE_ID "微信公众号 Template ID" "${MONITOR_WECHAT_TEMPLATE_ID}" true
+  ask_with_hidden_default MONITOR_WECHAT_TEMPLATE_ID "运行状态 Template ID" "${MONITOR_WECHAT_TEMPLATE_ID}" true
+  ask_with_hidden_default MONITOR_WECHAT_COST_TEMPLATE_ID "费用与流量 Template ID" "${MONITOR_WECHAT_COST_TEMPLATE_ID}" false
   ask_with_hidden_default MONITOR_WECHAT_OPEN_IDS "接收人 OpenID（多个用逗号分隔）" "${MONITOR_WECHAT_OPEN_IDS}" true
 
   if is_true "${immediate_default}"; then
@@ -328,12 +330,12 @@ collect_wechat_settings() {
   fi
 
   if is_true "${daily_default}"; then
-    if confirm "是否启用每日状态摘要" "y"; then
+    if confirm "是否启用每日双模板摘要" "y"; then
       MONITOR_WECHAT_DAILY_SUMMARY_ENABLED="true"
     else
       MONITOR_WECHAT_DAILY_SUMMARY_ENABLED="false"
     fi
-  elif confirm "是否启用每日状态摘要" "n"; then
+  elif confirm "是否启用每日双模板摘要" "n"; then
     MONITOR_WECHAT_DAILY_SUMMARY_ENABLED="true"
   else
     MONITOR_WECHAT_DAILY_SUMMARY_ENABLED="false"
@@ -342,8 +344,14 @@ collect_wechat_settings() {
   MONITOR_WECHAT_DAILY_SUMMARY_TIME="${daily_time_default}"
   MONITOR_WECHAT_ZONE_ID="${zone_id_default}"
   if [ "${MONITOR_WECHAT_DAILY_SUMMARY_ENABLED}" = "true" ]; then
+    if [ -z "${MONITOR_WECHAT_COST_TEMPLATE_ID}" ]; then
+      ask_with_hidden_default MONITOR_WECHAT_COST_TEMPLATE_ID \
+        "费用与流量 Template ID" \
+        "${MONITOR_WECHAT_COST_TEMPLATE_ID}" \
+        true
+    fi
     while true; do
-      ask MONITOR_WECHAT_DAILY_SUMMARY_TIME "每日状态摘要推送时间（HH:mm）" "${daily_time_default}" true
+      ask MONITOR_WECHAT_DAILY_SUMMARY_TIME "每日双模板摘要推送时间（HH:mm）" "${daily_time_default}" true
       validate_daily_time "${MONITOR_WECHAT_DAILY_SUMMARY_TIME}" && break
       warn "每日推送时间格式必须为 HH:mm，例如 09:00。"
     done
@@ -469,6 +477,7 @@ write_env_file() {
     write_env_entry "MONITOR_WECHAT_APP_ID" "${MONITOR_WECHAT_APP_ID}"
     write_env_entry "MONITOR_WECHAT_APP_SECRET" "${MONITOR_WECHAT_APP_SECRET}"
     write_env_entry "MONITOR_WECHAT_TEMPLATE_ID" "${MONITOR_WECHAT_TEMPLATE_ID}"
+    write_env_entry "MONITOR_WECHAT_COST_TEMPLATE_ID" "${MONITOR_WECHAT_COST_TEMPLATE_ID}"
     write_env_entry "MONITOR_WECHAT_OPEN_IDS" "${MONITOR_WECHAT_OPEN_IDS}"
     write_env_entry "MONITOR_WECHAT_IMMEDIATE_PUSH_ENABLED" "${MONITOR_WECHAT_IMMEDIATE_PUSH_ENABLED}"
     write_env_entry "MONITOR_WECHAT_DAILY_SUMMARY_ENABLED" "${MONITOR_WECHAT_DAILY_SUMMARY_ENABLED}"

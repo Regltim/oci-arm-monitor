@@ -23,6 +23,7 @@ import type {
   WechatDeliveryResult,
   WechatNotificationSettingsStatus,
   WechatNotificationSettingsUpdateRequest,
+  WechatTestDeliveryResult,
 } from '@/types/api';
 import { deleteApiData, getApiData, postApiData, putApiData } from './request';
 
@@ -102,8 +103,8 @@ export function updateWechatNotificationSettings(
   );
 }
 
-export function sendWechatTestNotification(): Promise<WechatDeliveryResult> {
-  return postApiData<WechatDeliveryResult, Record<string, never>>('/api/settings/wechat/test', {});
+export function sendWechatTestNotification(): Promise<WechatTestDeliveryResult> {
+  return postApiData<WechatTestDeliveryResult, Record<string, never>>('/api/settings/wechat/test', {});
 }
 
 export function listWechatNotificationDeliveries(): Promise<WechatDeliveryResult[]> {

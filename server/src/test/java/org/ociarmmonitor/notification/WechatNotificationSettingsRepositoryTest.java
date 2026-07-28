@@ -40,10 +40,14 @@ class WechatNotificationSettingsRepositoryTest {
 
     assertThat(settings.source()).isEqualTo("ENVIRONMENT");
     assertThat(settings.appId()).isEqualTo("wx_example_app_id");
+    assertThat(settings.costTemplateId()).isEqualTo("template_example_cost");
     assertThat(settings.openIds()).containsExactly("openid_example_1", "openid_example_2");
     assertThat(status.configured()).isTrue();
+    assertThat(status.dailySummaryConfigured()).isTrue();
+    assertThat(status.dailySummaryMissingReason()).isEmpty();
     assertThat(status.appIdMasked()).isEqualTo("wx_e****p_id");
     assertThat(status.templateIdMasked()).isEqualTo("temp****e_01");
+    assertThat(status.costTemplateIdMasked()).isEqualTo("temp****cost");
     assertThat(status.appSecretConfigured()).isTrue();
     assertThat(status.recipientCount()).isEqualTo(2);
   }
@@ -55,8 +59,8 @@ class WechatNotificationSettingsRepositoryTest {
       "wx_database_app",
       "database-secret",
       "database-template",
+      "database-cost-template",
       "openid_database_1, openid_database_1\nopenid_database_2",
-      "https://monitor.example.com",
       false,
       true,
       "21:30",
@@ -67,16 +71,20 @@ class WechatNotificationSettingsRepositoryTest {
     assertThat(updated.openIds()).containsExactly("openid_database_1", "openid_database_2");
     assertThat(updated.immediatePushEnabled()).isFalse();
     assertThat(updated.dailySummaryEnabled()).isTrue();
+    assertThat(updated.dailySummaryConfigured()).isTrue();
     assertThat(updated.dailySummaryTime().toString()).isEqualTo("21:30");
 
     String storedValues = jdbcTemplate.queryForObject("""
-      SELECT encrypted_app_id || encrypted_app_secret || encrypted_template_id || encrypted_open_ids
-      FROM wechat_notification_setting
-      WHERE id = 'default'
+      SELECT s.encrypted_app_id || s.encrypted_app_secret || s.encrypted_template_id
+        || s.encrypted_open_ids || c.encrypted_template_id
+      FROM wechat_notification_setting s
+      JOIN wechat_cost_template_setting c ON c.id = s.id
+      WHERE s.id = 'default'
       """, String.class);
     assertThat(storedValues)
       .doesNotContain("wx_database_app")
       .doesNotContain("database-secret")
+      .doesNotContain("database-cost-template")
       .doesNotContain("openid_database_1");
   }
 
@@ -90,7 +98,7 @@ class WechatNotificationSettingsRepositoryTest {
       "",
       "",
       "",
-      "https://dashboard.example.com",
+      "",
       true,
       false,
       "08:15",
@@ -100,9 +108,110 @@ class WechatNotificationSettingsRepositoryTest {
     assertThat(updated.appId()).isEqualTo("wx_database_app");
     assertThat(updated.appSecret()).isEqualTo("database-secret");
     assertThat(updated.templateId()).isEqualTo("database-template");
+    assertThat(updated.costTemplateId()).isEqualTo("database-cost-template");
     assertThat(updated.openIds()).containsExactly("openid_database_1", "openid_database_2");
-    assertThat(updated.publicUrl()).isEqualTo("https://dashboard.example.com");
     assertThat(updated.zoneId().getId()).isEqualTo("UTC");
+  }
+
+  @Test
+  void keepsSingleTemplateAlertConfigurationUsableButReportsDailySummaryMissing() {
+    WechatNotificationSettingsRepository singleTemplateRepository = new WechatNotificationSettingsRepository(
+      jdbcTemplate,
+      propertiesWithCostTemplate(""),
+      new WechatSecretCipher(VALID_KEY)
+    );
+
+    WechatNotificationSettings settings = singleTemplateRepository.resolve();
+    WechatNotificationSettingsStatus status = singleTemplateRepository.status();
+
+    assertThat(settings.configured()).isTrue();
+    assertThat(settings.dailySummaryConfigured()).isFalse();
+    assertThat(status.configured()).isTrue();
+    assertThat(status.dailySummaryConfigured()).isFalse();
+    assertThat(status.dailySummaryMissingReason()).isEqualTo("费用与流量模板未配置");
+  }
+
+  @Test
+  void reportsEnvironmentSourceWhenOnlyCostTemplateIsConfigured() {
+    WechatNotificationSettingsRepository costTemplateOnlyRepository = new WechatNotificationSettingsRepository(
+      jdbcTemplate,
+      new WechatNotificationProperties(
+        false,
+        "",
+        "",
+        "",
+        "template_example_cost",
+        "",
+        true,
+        false,
+        "09:00",
+        "Asia/Shanghai",
+        "https://api.weixin.qq.com"
+      ),
+      new WechatSecretCipher(VALID_KEY)
+    );
+
+    WechatNotificationSettingsStatus status = costTemplateOnlyRepository.status();
+
+    assertThat(status.source()).isEqualTo("ENVIRONMENT");
+    assertThat(status.costTemplateIdMasked()).isEqualTo("temp****cost");
+  }
+
+  @Test
+  void upgradesLegacyDatabaseWithoutLosingStoredSettings() {
+    SingleConnectionDataSource legacyDataSource = new SingleConnectionDataSource("jdbc:sqlite::memory:", true);
+    JdbcTemplate legacyJdbcTemplate = new JdbcTemplate(legacyDataSource);
+    WechatSecretCipher secretCipher = new WechatSecretCipher(VALID_KEY);
+    legacyJdbcTemplate.execute("""
+      CREATE TABLE wechat_notification_setting (
+        id TEXT PRIMARY KEY,
+        enabled INTEGER NOT NULL,
+        encrypted_app_id TEXT NOT NULL,
+        encrypted_app_secret TEXT NOT NULL,
+        encrypted_template_id TEXT NOT NULL,
+        encrypted_open_ids TEXT NOT NULL,
+        public_url TEXT NOT NULL,
+        immediate_push_enabled INTEGER NOT NULL,
+        daily_summary_enabled INTEGER NOT NULL,
+        daily_summary_time TEXT NOT NULL,
+        zone_id TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )
+      """);
+    legacyJdbcTemplate.update("""
+      INSERT INTO wechat_notification_setting(
+        id, enabled, encrypted_app_id, encrypted_app_secret, encrypted_template_id,
+        encrypted_open_ids, public_url, immediate_push_enabled, daily_summary_enabled,
+        daily_summary_time, zone_id, updated_at
+      ) VALUES ('default', 1, ?, ?, ?, ?, ?, 1, 0, '09:00', 'Asia/Shanghai', ?)
+      """,
+      secretCipher.encrypt("wx_legacy_app"),
+      secretCipher.encrypt("legacy-secret"),
+      secretCipher.encrypt("legacy-status-template"),
+      secretCipher.encrypt("openid_legacy_1"),
+      "https://legacy.example.com",
+      "2026-07-01T00:00:00Z"
+    );
+    new ResourceDatabasePopulator(new ClassPathResource("schema.sql")).execute(legacyDataSource);
+    WechatNotificationSettingsRepository legacyRepository = new WechatNotificationSettingsRepository(
+      legacyJdbcTemplate,
+      propertiesWithCostTemplate("template_example_cost"),
+      secretCipher
+    );
+
+    WechatNotificationSettings upgraded = legacyRepository.resolve();
+    legacyRepository.update(new WechatNotificationSettingsUpdateRequest(
+      true, "", "", "", "", "", true, true, "09:00", "Asia/Shanghai"
+    ));
+
+    assertThat(upgraded.appId()).isEqualTo("wx_legacy_app");
+    assertThat(upgraded.templateId()).isEqualTo("legacy-status-template");
+    assertThat(upgraded.costTemplateId()).isEqualTo("template_example_cost");
+    assertThat(upgraded.openIds()).containsExactly("openid_legacy_1");
+    assertThat(legacyJdbcTemplate.queryForObject(
+      "SELECT public_url FROM wechat_notification_setting WHERE id = 'default'",
+      String.class
+    )).isEqualTo("https://legacy.example.com");
   }
 
   @Test
@@ -112,24 +221,29 @@ class WechatNotificationSettingsRepositoryTest {
       emptyEnvironmentProperties(),
       new WechatSecretCipher(VALID_KEY)
     );
+    WechatNotificationSettingsRepository repositoryWithoutCostTemplate = new WechatNotificationSettingsRepository(
+      jdbcTemplate,
+      propertiesWithCostTemplate(""),
+      new WechatSecretCipher(VALID_KEY)
+    );
 
     assertThatThrownBy(() -> emptyRepository.update(new WechatNotificationSettingsUpdateRequest(
-      true, "", "", "", "", "https://monitor.example.com", true, false, "09:00", "Asia/Shanghai"
+      true, "", "", "", "", "", true, false, "09:00", "Asia/Shanghai"
     ))).isInstanceOf(IllegalArgumentException.class)
-      .hasMessage("启用微信公众号通知前，请完整填写 AppID、AppSecret、Template ID、接收人 OpenID 和面板地址");
+      .hasMessage("启用微信公众号通知前，请完整填写 AppID、AppSecret、运行状态 Template ID 和接收人 OpenID");
+
+    assertThatThrownBy(() -> repositoryWithoutCostTemplate.update(new WechatNotificationSettingsUpdateRequest(
+      true, "", "", "", "", "", true, true, "09:00", "Asia/Shanghai"
+    ))).isInstanceOf(IllegalArgumentException.class)
+      .hasMessage("启用每日摘要前，请配置费用与流量 Template ID");
 
     assertThatThrownBy(() -> repository.update(new WechatNotificationSettingsUpdateRequest(
-      false, "", "", "", "", "not-a-url", true, false, "09:00", "Asia/Shanghai"
-    ))).isInstanceOf(IllegalArgumentException.class)
-      .hasMessage("面板地址必须是有效的 HTTP 或 HTTPS 地址");
-
-    assertThatThrownBy(() -> repository.update(new WechatNotificationSettingsUpdateRequest(
-      false, "", "", "", "", "https://monitor.example.com", true, true, "25:00", "Asia/Shanghai"
+      false, "", "", "", "", "", true, true, "25:00", "Asia/Shanghai"
     ))).isInstanceOf(IllegalArgumentException.class)
       .hasMessage("每日推送时间格式必须为 HH:mm");
 
     assertThatThrownBy(() -> repository.update(new WechatNotificationSettingsUpdateRequest(
-      false, "", "", "", "", "https://monitor.example.com", true, false, "09:00", "Invalid/Zone"
+      false, "", "", "", "", "", true, false, "09:00", "Invalid/Zone"
     ))).isInstanceOf(IllegalArgumentException.class)
       .hasMessage("时区无效：Invalid/Zone");
   }
@@ -148,17 +262,21 @@ class WechatNotificationSettingsRepositoryTest {
   }
 
   private WechatNotificationProperties environmentProperties() {
+    return propertiesWithCostTemplate("template_example_cost");
+  }
+
+  private WechatNotificationProperties propertiesWithCostTemplate(String costTemplateId) {
     return new WechatNotificationProperties(
       true,
       "wx_example_app_id",
       "wx_example_secret",
       "template_example_01",
+      costTemplateId,
       "openid_example_1,openid_example_2",
       true,
       false,
       "09:00",
       "Asia/Shanghai",
-      "https://monitor.example.com",
       "https://api.weixin.qq.com"
     );
   }
@@ -170,11 +288,11 @@ class WechatNotificationSettingsRepositoryTest {
       "",
       "",
       "",
+      "",
       true,
       false,
       "09:00",
       "Asia/Shanghai",
-      "",
       "https://api.weixin.qq.com"
     );
   }
@@ -185,8 +303,8 @@ class WechatNotificationSettingsRepositoryTest {
       "wx_database_app",
       "database-secret",
       "database-template",
+      "database-cost-template",
       "openid_database_1,openid_database_2",
-      "https://monitor.example.com",
       true,
       false,
       "09:00",

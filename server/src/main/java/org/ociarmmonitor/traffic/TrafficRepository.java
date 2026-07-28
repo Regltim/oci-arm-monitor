@@ -3,6 +3,7 @@ package org.ociarmmonitor.traffic;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.LocalDate;
+import java.time.YearMonth;
 import java.util.List;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -36,7 +37,11 @@ public class TrafficRepository {
   }
 
   public List<TrafficDaily> listCurrentMonth() {
-    String monthPrefix = LocalDate.now().withDayOfMonth(1).toString().substring(0, 7);
+    return listMonth(YearMonth.now());
+  }
+
+  public List<TrafficDaily> listMonth(YearMonth month) {
+    String monthPrefix = month.toString();
     return jdbcTemplate.query("""
       SELECT instance_id, stat_date, ingress_gb, egress_gb
       FROM traffic_daily
@@ -46,11 +51,19 @@ public class TrafficRepository {
   }
 
   public double sumIngressForCurrentMonth() {
-    return sumCurrentMonth("ingress_gb");
+    return sumMonth("ingress_gb", YearMonth.now());
   }
 
   public double sumEgressForCurrentMonth() {
-    return sumCurrentMonth("egress_gb");
+    return sumMonth("egress_gb", YearMonth.now());
+  }
+
+  public double sumIngressForMonth(YearMonth month) {
+    return sumMonth("ingress_gb", month);
+  }
+
+  public double sumEgressForMonth(YearMonth month) {
+    return sumMonth("egress_gb", month);
   }
 
   public double egressByInstanceAndDate(String instanceId, LocalDate date) {
@@ -62,8 +75,8 @@ public class TrafficRepository {
     return value == null ? 0 : value;
   }
 
-  private double sumCurrentMonth(String columnName) {
-    String monthPrefix = LocalDate.now().withDayOfMonth(1).toString().substring(0, 7);
+  private double sumMonth(String columnName, YearMonth month) {
+    String monthPrefix = month.toString();
     Double value = jdbcTemplate.queryForObject("""
       SELECT COALESCE(SUM(%s), 0)
       FROM traffic_daily

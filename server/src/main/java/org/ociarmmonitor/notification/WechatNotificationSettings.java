@@ -9,6 +9,7 @@ public record WechatNotificationSettings(
   String appId,
   String appSecret,
   String templateId,
+  String costTemplateId,
   List<String> openIds,
   String publicUrl,
   boolean immediatePushEnabled,
@@ -23,7 +24,41 @@ public record WechatNotificationSettings(
     return !appId.isBlank()
       && !appSecret.isBlank()
       && !templateId.isBlank()
-      && !openIds.isEmpty()
-      && !publicUrl.isBlank();
+      && !openIds.isEmpty();
+  }
+
+  public boolean dailySummaryConfigured() {
+    return configured() && !costTemplateId.isBlank();
+  }
+
+  public WechatNotificationSettings(
+    boolean enabled,
+    String appId,
+    String appSecret,
+    String templateId,
+    List<String> openIds,
+    String publicUrl,
+    boolean immediatePushEnabled,
+    boolean dailySummaryEnabled,
+    LocalTime dailySummaryTime,
+    ZoneId zoneId,
+    String source,
+    String updatedAt
+  ) {
+    this(
+      enabled,
+      appId,
+      appSecret,
+      templateId,
+      "",
+      openIds,
+      publicUrl,
+      immediatePushEnabled,
+      dailySummaryEnabled,
+      dailySummaryTime,
+      zoneId,
+      source,
+      updatedAt
+    );
   }
 }

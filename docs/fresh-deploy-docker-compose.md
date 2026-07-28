@@ -66,6 +66,7 @@ bash scripts/init-deploy.sh
 3. 管理员账号和密码。
 4. OCI 认证模式、Region、Tenancy 和目标 Compartment。
 5. API Key 模式所需的 OCI config 路径。
+6. 可选的微信公众号双模板、接收人和推送策略。
 
 公开 Origin 只能包含协议、主机名和可选端口，不能带路径、查询参数或末尾斜杠。它用于生成 CORS 和 Cookie 配置，不负责容器 TLS。
 
@@ -80,6 +81,7 @@ MONITOR_WECHAT_ENABLED=false
 MONITOR_WECHAT_APP_ID=
 MONITOR_WECHAT_APP_SECRET=
 MONITOR_WECHAT_TEMPLATE_ID=
+MONITOR_WECHAT_COST_TEMPLATE_ID=
 MONITOR_WECHAT_OPEN_IDS=
 MONITOR_WECHAT_IMMEDIATE_PUSH_ENABLED=true
 MONITOR_WECHAT_DAILY_SUMMARY_ENABLED=false
@@ -90,7 +92,7 @@ MONITOR_CORS_ALLOWED_ORIGINS=https://monitor.example.com
 MONITOR_COOKIE_SECURE=true
 ```
 
-微信公众号通知可以在初始化脚本中配置，也可以部署后在“系统设置 → 通知设置”中维护。脚本会自动生成 `MONITOR_SETTINGS_ENCRYPTION_KEY`，用于加密页面保存到 SQLite 的公众号凭据。详细步骤见[微信公众号通知配置](wechat-notifications.md)。
+微信公众号通知可以在初始化脚本中配置，也可以部署后在“系统设置 → 通知设置”中维护。运行状态和费用流量使用两份独立 Template ID，每日摘要开启时会发送两条不带网页跳转的消息。脚本会自动生成 `MONITOR_SETTINGS_ENCRYPTION_KEY`，用于加密页面保存到 SQLite 的公众号凭据。详细步骤见[微信公众号通知配置](wechat-notifications.md)。
 
 重新运行脚本会备份旧 `.env`。已有域名、OCID 和密码不会在提示中明文回显。
 

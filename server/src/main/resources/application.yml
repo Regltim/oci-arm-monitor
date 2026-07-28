@@ -41,6 +41,7 @@ monitor:
     app-id: ${MONITOR_WECHAT_APP_ID:}
     app-secret: ${MONITOR_WECHAT_APP_SECRET:}
     template-id: ${MONITOR_WECHAT_TEMPLATE_ID:}
+    cost-template-id: ${MONITOR_WECHAT_COST_TEMPLATE_ID:}
     open-ids: ${MONITOR_WECHAT_OPEN_IDS:}
     immediate-push-enabled: ${MONITOR_WECHAT_IMMEDIATE_PUSH_ENABLED:true}
     daily-summary-enabled: ${MONITOR_WECHAT_DAILY_SUMMARY_ENABLED:false}

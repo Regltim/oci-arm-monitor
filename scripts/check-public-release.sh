@@ -150,7 +150,7 @@ main() {
   check_sensitive_paths
   check_content_pattern "私钥内容" '-----BEGIN ([A-Z ]+ )?PRIVATE KEY-----'
   check_content_pattern "真实 OCI OCID" 'ocid1\.(tenancy|user|instance|compartment|key)\.[[:alnum:].-]*\.[[:alnum:]]{30,}'
-  check_content_pattern "疑似真实微信公众号凭据" 'MONITOR_WECHAT_(APP_ID|APP_SECRET|TEMPLATE_ID|OPEN_IDS)[[:space:]]*=[[:space:]]*['"'"']?(wx[[:xdigit:]]{16}|[[:xdigit:]]{32}|o[[:alnum:]_-]{20,}|[[:alnum:]_-]{40,})'
+  check_content_pattern "疑似真实微信公众号凭据" 'MONITOR_WECHAT_(APP_ID|APP_SECRET|TEMPLATE_ID|COST_TEMPLATE_ID|OPEN_IDS)[[:space:]]*=[[:space:]]*['"'"']?(wx[[:xdigit:]]{16}|[[:xdigit:]]{32}|o[[:alnum:]_-]{20,}|[[:alnum:]_-]{40,})'
   check_content_pattern "邮箱地址" '[[:alnum:]._%+-]+@[[:alnum:].-]+\.[[:alpha:]]{2,}'
   check_content_pattern "macOS 个人用户目录" '/Users/[[:alnum:]_.-]+/'
   check_denylist

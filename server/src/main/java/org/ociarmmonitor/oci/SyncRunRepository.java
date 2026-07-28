@@ -63,6 +63,17 @@ public class SyncRunRepository {
     return results.stream().findFirst();
   }
 
+  public Optional<SyncResult> latestSuccessful() {
+    List<SyncResult> results = jdbcTemplate.query("""
+      SELECT status, message, started_at, finished_at, instance_count, metric_count, traffic_count, cost_count
+      FROM sync_run
+      WHERE status = 'SUCCESS'
+      ORDER BY started_at DESC
+      LIMIT 1
+      """, (resultSet, rowNum) -> mapResult(resultSet));
+    return results.stream().findFirst();
+  }
+
   public List<SyncRunRecord> listRecent(int limit) {
     return jdbcTemplate.query("""
       SELECT id, sync_type, status, message, started_at, finished_at, instance_count, metric_count, traffic_count, cost_count

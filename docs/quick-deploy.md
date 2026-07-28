@@ -19,7 +19,7 @@ cd oci-arm-monitor
 bash scripts/init-deploy.sh
 ```
 
-初始化脚本会询问是否启用微信公众号通知。暂时不需要时直接回车跳过；需要时准备测试公众号的 AppID、AppSecret、Template ID 和关注用户 OpenID。完整步骤见[微信公众号通知配置](wechat-notifications.md)。
+初始化脚本会询问是否启用微信公众号通知。暂时不需要时直接回车跳过；需要时准备测试公众号的 AppID、AppSecret、运行状态 Template ID、费用与流量 Template ID 和关注用户 OpenID。完整步骤见[微信公众号通知配置](wechat-notifications.md)。
 
 公开访问 Origin 填用户最终访问的地址：
 

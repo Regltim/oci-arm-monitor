@@ -174,6 +174,12 @@ CREATE TABLE IF NOT EXISTS wechat_notification_setting (
   updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS wechat_cost_template_setting (
+  id TEXT PRIMARY KEY,
+  encrypted_template_id TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS alert_notification_state (
   metric_name TEXT PRIMARY KEY,
   active INTEGER NOT NULL,

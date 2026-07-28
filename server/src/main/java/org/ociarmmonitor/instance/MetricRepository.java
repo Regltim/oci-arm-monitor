@@ -4,6 +4,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.Collections;
 import java.util.List;
+import java.util.OptionalDouble;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -58,6 +59,10 @@ public class MetricRepository {
   }
 
   public double latest(String instanceId, String metricName) {
+    return latestOptional(instanceId, metricName).orElse(0);
+  }
+
+  public OptionalDouble latestOptional(String instanceId, String metricName) {
     List<Double> values = jdbcTemplate.query("""
       SELECT metric_value
       FROM metric_point
@@ -65,7 +70,7 @@ public class MetricRepository {
       ORDER BY sampled_at DESC
       LIMIT 1
       """, (resultSet, rowNum) -> resultSet.getDouble("metric_value"), instanceId, metricName);
-    return values.isEmpty() ? 0 : values.get(0);
+    return values.isEmpty() ? OptionalDouble.empty() : OptionalDouble.of(values.get(0));
   }
 
   private MetricPoint mapMetric(ResultSet resultSet) throws SQLException {

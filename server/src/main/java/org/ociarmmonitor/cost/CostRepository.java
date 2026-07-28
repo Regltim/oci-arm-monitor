@@ -3,6 +3,7 @@ package org.ociarmmonitor.cost;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.LocalDate;
+import java.time.YearMonth;
 import java.util.List;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -41,7 +42,11 @@ public class CostRepository {
   }
 
   public List<CostDaily> listCurrentMonth() {
-    String monthPrefix = currentMonthPrefix();
+    return listMonth(YearMonth.now());
+  }
+
+  public List<CostDaily> listMonth(YearMonth month) {
+    String monthPrefix = month.toString();
     return jdbcTemplate.query("""
       SELECT service_name, resource_id, stat_date, usage_amount, usage_unit, cost_amount, currency
       FROM cost_daily
@@ -51,7 +56,11 @@ public class CostRepository {
   }
 
   public double costForCurrentMonth() {
-    String monthPrefix = currentMonthPrefix();
+    return costForMonth(YearMonth.now());
+  }
+
+  public double costForMonth(YearMonth month) {
+    String monthPrefix = month.toString();
     Double value = jdbcTemplate.queryForObject("""
       SELECT COALESCE(SUM(cost_amount), 0)
       FROM cost_daily

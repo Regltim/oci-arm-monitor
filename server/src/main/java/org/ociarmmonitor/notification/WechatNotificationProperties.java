@@ -1,5 +1,6 @@
 package org.ociarmmonitor.notification;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -10,6 +11,7 @@ public class WechatNotificationProperties {
   private final String appId;
   private final String appSecret;
   private final String templateId;
+  private final String costTemplateId;
   private final String openIds;
   private final boolean immediatePushEnabled;
   private final boolean dailySummaryEnabled;
@@ -18,11 +20,13 @@ public class WechatNotificationProperties {
   private final String publicUrl;
   private final String apiBaseUrl;
 
+  @Autowired
   public WechatNotificationProperties(
     @Value("${monitor.wechat.enabled:false}") boolean enabled,
     @Value("${monitor.wechat.app-id:}") String appId,
     @Value("${monitor.wechat.app-secret:}") String appSecret,
     @Value("${monitor.wechat.template-id:}") String templateId,
+    @Value("${monitor.wechat.cost-template-id:}") String costTemplateId,
     @Value("${monitor.wechat.open-ids:}") String openIds,
     @Value("${monitor.wechat.immediate-push-enabled:true}") boolean immediatePushEnabled,
     @Value("${monitor.wechat.daily-summary-enabled:false}") boolean dailySummaryEnabled,
@@ -35,6 +39,7 @@ public class WechatNotificationProperties {
     this.appId = appId;
     this.appSecret = appSecret;
     this.templateId = templateId;
+    this.costTemplateId = costTemplateId;
     this.openIds = openIds;
     this.immediatePushEnabled = immediatePushEnabled;
     this.dailySummaryEnabled = dailySummaryEnabled;
@@ -58,6 +63,10 @@ public class WechatNotificationProperties {
 
   public String templateId() {
     return templateId;
+  }
+
+  public String costTemplateId() {
+    return costTemplateId;
   }
 
   public String openIds() {
@@ -86,5 +95,63 @@ public class WechatNotificationProperties {
 
   public String apiBaseUrl() {
     return apiBaseUrl;
+  }
+
+  public WechatNotificationProperties(
+    boolean enabled,
+    String appId,
+    String appSecret,
+    String templateId,
+    String costTemplateId,
+    String openIds,
+    boolean immediatePushEnabled,
+    boolean dailySummaryEnabled,
+    String dailySummaryTime,
+    String zoneId,
+    String apiBaseUrl
+  ) {
+    this(
+      enabled,
+      appId,
+      appSecret,
+      templateId,
+      costTemplateId,
+      openIds,
+      immediatePushEnabled,
+      dailySummaryEnabled,
+      dailySummaryTime,
+      zoneId,
+      "",
+      apiBaseUrl
+    );
+  }
+
+  public WechatNotificationProperties(
+    boolean enabled,
+    String appId,
+    String appSecret,
+    String templateId,
+    String openIds,
+    boolean immediatePushEnabled,
+    boolean dailySummaryEnabled,
+    String dailySummaryTime,
+    String zoneId,
+    String publicUrl,
+    String apiBaseUrl
+  ) {
+    this(
+      enabled,
+      appId,
+      appSecret,
+      templateId,
+      "",
+      openIds,
+      immediatePushEnabled,
+      dailySummaryEnabled,
+      dailySummaryTime,
+      zoneId,
+      publicUrl,
+      apiBaseUrl
+    );
   }
 }

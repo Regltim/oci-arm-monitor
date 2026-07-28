@@ -159,6 +159,7 @@ class AlertNotificationCoordinatorTest {
     public void sendTemplate(
       WechatNotificationSettings settings,
       String openId,
+      WechatTemplateType templateType,
       WechatTemplateMessage message
     ) {
       messages.add(message);

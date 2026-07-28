@@ -313,6 +313,7 @@ test_wechat_notifications_can_be_disabled_without_echoing_existing_credentials()
   local tmp_dir
   local private_secret="existing-private-secret"
   local private_open_id="existing-private-openid"
+  local private_cost_template="existing-private-cost-template"
 
   tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/oci-wechat-settings.XXXXXX")"
   mkdir -p "${tmp_dir}/scripts"
@@ -322,6 +323,7 @@ test_wechat_notifications_can_be_disabled_without_echoing_existing_credentials()
     printf "MONITOR_WECHAT_APP_ID='wx_existing_app'\n"
     printf "MONITOR_WECHAT_APP_SECRET='%s'\n" "${private_secret}"
     printf "MONITOR_WECHAT_TEMPLATE_ID='existing-template'\n"
+    printf "MONITOR_WECHAT_COST_TEMPLATE_ID='%s'\n" "${private_cost_template}"
     printf "MONITOR_WECHAT_OPEN_IDS='%s'\n" "${private_open_id}"
   } >"${tmp_dir}/.env"
 
@@ -344,6 +346,7 @@ test_wechat_notifications_can_be_disabled_without_echoing_existing_credentials()
   assert_not_contains "${output}" "AppSecret:" || return 1
   assert_not_contains "${output}" "接收人 OpenID:" || return 1
   assert_not_contains "${output}" "${private_secret}" || return 1
+  assert_not_contains "${output}" "${private_cost_template}" || return 1
   assert_not_contains "${output}" "${private_open_id}"
 }
 
@@ -356,15 +359,15 @@ test_wechat_notifications_collects_immediate_and_daily_policy() {
   cp "${ROOT_DIR}/scripts/init-deploy.sh" "${tmp_dir}/scripts/init-deploy.sh"
 
   output="$(
-    printf 'y\nwx_example_app\nexample-secret\ntemplate_example_01\nopenid_example_1,openid_example_2\n\ny\n21:30\n\n' | \
+    printf 'y\nwx_example_app\nexample-secret\ntemplate_example_status\ntemplate_example_cost\nopenid_example_1,openid_example_2\n\ny\n21:30\n\n' | \
       INIT_DEPLOY_LIB_ONLY=true bash -c '
         source "$1"
-        MONITOR_PUBLIC_URL="https://monitor.example.com"
         collect_wechat_settings
-        printf "selected=%s|%s|%s|%s|%s|%s|%s" \
+        printf "selected=%s|%s|%s|%s|%s|%s|%s|%s" \
           "${MONITOR_WECHAT_ENABLED}" \
           "${MONITOR_WECHAT_APP_ID}" \
           "${MONITOR_WECHAT_TEMPLATE_ID}" \
+          "${MONITOR_WECHAT_COST_TEMPLATE_ID}" \
           "${MONITOR_WECHAT_OPEN_IDS}" \
           "${MONITOR_WECHAT_IMMEDIATE_PUSH_ENABLED}" \
           "${MONITOR_WECHAT_DAILY_SUMMARY_ENABLED}" \
@@ -376,7 +379,79 @@ test_wechat_notifications_collects_immediate_and_daily_policy() {
   }
 
   rm -rf "${tmp_dir}"
-  assert_contains "${output}" "selected=true|wx_example_app|template_example_01|openid_example_1,openid_example_2|true|true|21:30@Asia/Shanghai"
+  assert_contains "${output}" "selected=true|wx_example_app|template_example_status|template_example_cost|openid_example_1,openid_example_2|true|true|21:30@Asia/Shanghai"
+}
+
+test_wechat_cost_template_is_optional_when_daily_summary_is_disabled() {
+  local output
+
+  output="$(
+    printf 'y\nwx_example_app\nexample-secret\ntemplate_example_status\n\nopenid_example_1\n\nn\n' | \
+      INIT_DEPLOY_LIB_ONLY=true bash -c '
+        source "$1"
+        collect_wechat_settings
+        printf "selected=%s|%s" \
+          "${MONITOR_WECHAT_COST_TEMPLATE_ID}" \
+          "${MONITOR_WECHAT_DAILY_SUMMARY_ENABLED}"
+      ' _ "${ROOT_DIR}/scripts/init-deploy.sh" 2>&1
+  )" || return 1
+
+  assert_contains "${output}" "selected=|false"
+}
+
+test_wechat_daily_summary_requires_cost_template() {
+  local output
+
+  output="$(
+    printf 'y\nwx_example_app\nexample-secret\ntemplate_example_status\n\nopenid_example_1\n\ny\n\ntemplate_example_cost\n21:30\n\n' | \
+      INIT_DEPLOY_LIB_ONLY=true bash -c '
+        source "$1"
+        collect_wechat_settings
+        printf "selected=%s|%s" \
+          "${MONITOR_WECHAT_COST_TEMPLATE_ID}" \
+          "${MONITOR_WECHAT_DAILY_SUMMARY_ENABLED}"
+      ' _ "${ROOT_DIR}/scripts/init-deploy.sh" 2>&1
+  )" || return 1
+
+  assert_contains "${output}" "该字段不能为空" || return 1
+  assert_contains "${output}" "selected=template_example_cost|true"
+}
+
+test_existing_wechat_cost_template_is_preserved_without_echoing_it() {
+  local output
+  local tmp_dir
+  local private_cost_template="existing-private-cost-template"
+
+  tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/oci-wechat-cost-template.XXXXXX")"
+  mkdir -p "${tmp_dir}/scripts"
+  cp "${ROOT_DIR}/scripts/init-deploy.sh" "${tmp_dir}/scripts/init-deploy.sh"
+  {
+    printf "MONITOR_WECHAT_ENABLED='true'\n"
+    printf "MONITOR_WECHAT_APP_ID='wx_existing_app'\n"
+    printf "MONITOR_WECHAT_APP_SECRET='existing-private-secret'\n"
+    printf "MONITOR_WECHAT_TEMPLATE_ID='existing-private-status-template'\n"
+    printf "MONITOR_WECHAT_COST_TEMPLATE_ID='%s'\n" "${private_cost_template}"
+    printf "MONITOR_WECHAT_OPEN_IDS='existing-private-openid'\n"
+    printf "MONITOR_WECHAT_DAILY_SUMMARY_ENABLED='false'\n"
+  } >"${tmp_dir}/.env"
+
+  output="$(
+    printf 'y\n\n\n\n\n\n\nn\n' | INIT_DEPLOY_LIB_ONLY=true bash -c '
+      source "$1"
+      collect_wechat_settings
+      if [ "${MONITOR_WECHAT_COST_TEMPLATE_ID}" = "$2" ]; then
+        printf "selected=preserved"
+      fi
+    ' _ "${tmp_dir}/scripts/init-deploy.sh" "${private_cost_template}" 2>&1
+  )" || {
+    rm -rf "${tmp_dir}"
+    return 1
+  }
+
+  rm -rf "${tmp_dir}"
+  assert_contains "${output}" "费用与流量 Template ID [已设置，回车保留]" || return 1
+  assert_contains "${output}" "selected=preserved" || return 1
+  assert_not_contains "${output}" "${private_cost_template}"
 }
 
 test_settings_encryption_key_is_generated_and_preserved() {
@@ -504,6 +579,29 @@ test_public_release_check_rejects_wechat_template_id() {
   assert_contains "${output}" "疑似真实微信公众号凭据"
 }
 
+test_public_release_check_rejects_wechat_cost_template_id() {
+  local tmp_dir
+  local output
+  local exit_code
+
+  tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/oci-public-check.XXXXXX")"
+  git -C "${tmp_dir}" init -q
+  printf "%s%s\n" \
+    "MONITOR_WECHAT_COST_TEMPLATE_ID=ZyXwVuTsRqPoNmLk" \
+    "JiHgFeDcBa9876543210_costABC" > "${tmp_dir}/.env.example"
+  git -C "${tmp_dir}" add .env.example
+
+  output="$(bash "${ROOT_DIR}/scripts/check-public-release.sh" --root "${tmp_dir}" 2>&1)"
+  exit_code=$?
+  rm -rf "${tmp_dir}"
+
+  if [ "${exit_code}" -eq 0 ]; then
+    return 1
+  fi
+
+  assert_contains "${output}" "疑似真实微信公众号凭据"
+}
+
 run_test "Cloud Shell IAM dry-run" test_cloud_shell_script_supports_dry_run
 run_test "Cloud Shell 支持根 Compartment" test_cloud_shell_script_supports_root_compartment
 run_test "实例 Metadata 自动识别" test_instance_metadata_is_auto_detected
@@ -516,12 +614,16 @@ run_test "初始化脚本支持根 Compartment" test_init_deploy_root_compartmen
 run_test "已有私有配置不回显" test_existing_private_value_is_not_echoed
 run_test "关闭公众号通知时不追问或回显凭据" test_wechat_notifications_can_be_disabled_without_echoing_existing_credentials
 run_test "公众号通知收集即时和每日策略" test_wechat_notifications_collects_immediate_and_daily_policy
+run_test "关闭每日摘要时费用模板可留空" test_wechat_cost_template_is_optional_when_daily_summary_is_disabled
+run_test "开启每日摘要时必须配置费用模板" test_wechat_daily_summary_requires_cost_template
+run_test "已有费用模板隐藏并保留" test_existing_wechat_cost_template_is_preserved_without_echoing_it
 run_test "通知配置加密密钥自动生成并保留" test_settings_encryption_key_is_generated_and_preserved
 run_test "开源检查拦截私钥" test_public_release_check_rejects_sensitive_content
 run_test "开源检查允许占位数据" test_public_release_check_accepts_placeholder_data
 run_test "开源检查拦截未跟踪敏感文件" test_public_release_check_rejects_untracked_sensitive_file
 run_test "开源检查拦截微信公众号凭据" test_public_release_check_rejects_wechat_credentials
 run_test "开源检查拦截微信公众号 Template ID" test_public_release_check_rejects_wechat_template_id
+run_test "开源检查拦截微信公众号费用 Template ID" test_public_release_check_rejects_wechat_cost_template_id
 
 if [ "${FAILURES}" -gt 0 ]; then
   printf "共 %s 项测试失败。\n" "${FAILURES}" >&2

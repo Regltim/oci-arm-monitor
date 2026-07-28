@@ -1,49 +1,130 @@
 # 微信公众号通知配置
 
-OCI ARM Monitor 可以通过微信公众号模板消息发送：
+OCI ARM Monitor 通过微信官方公众号模板消息发送告警、恢复和每日摘要。每天的摘要分为两条独立消息：
 
-- CPU、内存、磁盘和 OCI 同步延迟告警；
-- 告警恢复通知；
-- 手动测试通知；
-- 可选的每日服务器状态摘要。
+- 运行状态：实例状态、实例 CPU/内存、监控主机 CPU/内存/磁盘、活动告警和 OCI 同步状态；
+- 费用与流量：OCI 费用、手工费用、本月总费用、月底预测、入站/出站流量和免费额度。
+
+微信请求不携带 `url` 或 `miniprogram`，消息不会打开监控网站。所有明细都直接显示在微信消息中。
 
 当前只接入微信官方公众号接口，不需要 WxPusher、邮件服务或额外推送容器。
 
 ## 适用账号
 
-推荐先使用[微信公众平台测试账号](https://mp.weixin.qq.com/debug/cgi-bin/sandbox?t=sandbox/login)。测试账号可以直接创建模板并让个人微信扫码关注，适合验证完整推送链路。
+推荐先使用[微信公众平台测试账号](https://mp.weixin.qq.com/debug/cgi-bin/sandbox?t=sandbox/login)。测试账号可以直接创建模板，并让个人微信扫码关注，适合验证完整推送链路。
 
-正式公众号必须具备模板消息接口权限。未认证个人公众号通常没有该权限；这种情况下继续使用测试账号即可，不需要购买第三方服务。
+正式公众号必须具备模板消息接口权限。未认证个人公众号通常没有该权限；这种情况下可以继续使用测试账号，不需要购买第三方服务。
 
-## 一、创建测试模板
+## 一、准备测试账号
 
 1. 打开微信公众平台测试账号页面并扫码登录。
 2. 在“测试号信息”中找到 `appID` 和 `appsecret`。
 3. 使用需要接收通知的个人微信扫描测试号二维码。
 4. 在“用户列表”中复制该微信对应的 OpenID。
-5. 在“模板消息接口”中新增测试模板。
+5. 在“模板消息接口”中分别新增下面两个模板。
+
+## 二、创建运行状态模板
 
 模板标题：
 
 ```text
-OCI ARM Monitor 通知
+OCI ARM Monitor 运行通知
 ```
 
 模板内容：
 
 ```text
 {{first.DATA}}
-告警级别：{{level.DATA}}
-告警项目：{{metric.DATA}}
+通知级别：{{level.DATA}}
+监控范围：{{metric.DATA}}
 当前状态：{{status.DATA}}
-详细内容：{{content.DATA}}
-发生时间：{{time.DATA}}
+运行详情：
+{{content.DATA}}
+通知时间：{{time.DATA}}
 {{remark.DATA}}
 ```
 
-保存后复制 Template ID。字段名必须保持为 `first`、`level`、`metric`、`status`、`content`、`time` 和 `remark`，否则微信会拒绝消息。
+保存后复制第一份 Template ID。它用于：
 
-## 二、初始化时配置
+- 即时告警；
+- 告警恢复；
+- 每日运行状态；
+- 运行模板测试。
+
+运行状态日报示例：
+
+```text
+OCI ARM Monitor 每日运行状态
+通知级别：警告
+监控范围：实例与监控主机
+当前状态：3 台实例，1 项活动告警
+运行详情：
+实例汇总：运行 2 台，停止 1 台，其他 0 台
+- arm-app-01：运行中，CPU 12.30%，内存 41.20%
+- arm-app-02：运行中，CPU 26.80%，内存 53.10%
+- arm-backup：已停止
+监控主机：CPU 18.20%，内存 62.50%，磁盘 71.30%
+活动告警：磁盘使用率（磁盘使用率当前 71.30%，阈值 70.00%。）
+OCI 同步：成功，2026-07-27 08:02:16（同步完成）
+通知时间：2026-07-27 09:00:00
+数据来自最近一次主机采样和 OCI 同步
+```
+
+实例最多展开 10 台，活动告警最多展开 5 项。缺少实例指标时显示“暂无数据”，不会把缺失数据显示为 `0%`。消息不包含实例 OCID 或 IP 地址。
+
+## 三、创建费用与流量模板
+
+模板标题：
+
+```text
+OCI ARM Monitor 费用与流量日报
+```
+
+模板内容：
+
+```text
+{{first.DATA}}
+通知级别：{{level.DATA}}
+统计范围：{{metric.DATA}}
+当前状态：{{status.DATA}}
+费用与流量：
+{{content.DATA}}
+统计时间：{{time.DATA}}
+{{remark.DATA}}
+```
+
+保存后复制第二份 Template ID。它用于：
+
+- 每日费用与流量摘要；
+- 费用与流量模板测试。
+
+费用与流量日报示例：
+
+```text
+OCI ARM Monitor 费用与流量日报
+通知级别：信息
+统计范围：本月累计
+当前状态：费用与流量正常
+费用与流量：
+OCI 费用：¥12.34
+手工费用：¥8.00
+本月总费用：¥20.34
+月底费用预测：¥28.62
+入站流量：123.45 GB
+出站流量：67.89 GB
+出站免费额度：10,000.00 GB
+额度使用率：0.68%
+剩余额度：9,932.11 GB
+数据同步：2026-07-27 08:02:16
+统计时间：2026-07-27 09:00:00
+费用以 OCI Usage API 和手工记录为准
+```
+
+出站流量超过免费额度时会显示“超出额度”。免费额度为 `0` 时显示“出站免费额度：未配置”，不会计算使用率和剩余额度。没有成功 OCI 同步时，OCI 费用和流量显示“暂无同步数据”，手工费用仍按本地真实记录显示。
+
+两个模板的字段名都必须保持为 `first`、`level`、`metric`、`status`、`content`、`time` 和 `remark`，否则微信会拒绝消息。
+
+## 四、初始化时配置
 
 在项目目录执行：
 
@@ -51,23 +132,18 @@ OCI ARM Monitor 通知
 bash scripts/init-deploy.sh
 ```
 
-脚本询问：
-
-```text
-是否启用微信公众号通知 [y/N]
-```
-
-选择 `y` 后依次填写：
+选择启用微信公众号通知后，脚本依次询问：
 
 - AppID；
 - AppSecret；
-- Template ID；
+- 运行状态 Template ID；
+- 费用与流量 Template ID；
 - 接收人 OpenID，多个使用英文逗号分隔；
 - 是否在告警状态变化时立即推送；
-- 是否启用每日状态摘要；
+- 是否启用每日双模板摘要；
 - 每日推送时间和时区。
 
-已有 AppSecret、OpenID 和其他标识不会显示在提示默认值中，直接回车可以保留。脚本还会生成 `MONITOR_SETTINGS_ENCRYPTION_KEY`，二次初始化时会继续使用原密钥。
+关闭每日摘要时，费用与流量 Template ID 可以暂时留空；开启每日摘要时必须填写。已有凭据和标识只显示“已设置，回车保留”，脚本不会回显原值。
 
 完成后重新构建容器：
 
@@ -77,43 +153,29 @@ docker compose up -d --build
 docker compose ps
 ```
 
-## 三、在监控页面配置
+## 五、在监控页面配置
 
 登录监控面板，进入“系统设置 → 通知设置”。页面支持：
 
 - 启用或停用微信公众号通知；
-- 覆盖 AppID、AppSecret、Template ID 和接收人；
-- 设置监控面板访问地址；
-- 独立控制即时告警和每日摘要；
-- 发送测试通知；
+- 分别配置运行状态和费用与流量 Template ID；
+- 覆盖 AppID、AppSecret 和接收人；
+- 独立控制即时告警和每日双模板摘要；
+- 同时测试两个模板并分别显示结果；
 - 查看最近 20 条脱敏推送结果。
 
-凭据输入框是只写字段。页面只显示 AppID、Template ID 的掩码、AppSecret 是否已设置以及接收人数，不会从后端读取 AppSecret 或 OpenID 明文。留空保存表示保留当前值。
+凭据输入框是只写字段。页面只显示 AppID 和两份 Template ID 的掩码、AppSecret 是否已设置以及接收人数，不会返回 AppSecret、OpenID 或完整 Template ID。留空保存表示保留当前值。
 
-如果页面提示“后台保存暂不可用”，重新运行初始化脚本生成加密密钥，然后重建后端容器：
+基础通知配置完整但费用模板缺失时，手动测试仍会发送运行模板，并把费用模板显示为“未配置”。
+
+如果页面提示“后台保存暂不可用”，重新运行初始化脚本生成加密密钥，然后重建容器：
 
 ```bash
 bash scripts/init-deploy.sh
 docker compose up -d --build
 ```
 
-## 四、面板地址与反向代理
-
-模板消息点击后会打开 `MONITOR_PUBLIC_URL`。该值应填写用户实际访问的完整 Origin，例如：
-
-```text
-https://monitor.example.com
-```
-
-容器不管理域名或证书。服务器已有的 Nginx、OpenResty 或 1Panel 继续把域名反向代理到默认 Web 地址：
-
-```text
-http://127.0.0.1:28461
-```
-
-不要填写容器内部后端端口 `9090`，也不要在面板地址后添加路径、查询参数或末尾斜杠。
-
-## 五、推送规则
+## 六、推送规则
 
 即时推送开启时：
 
@@ -121,13 +183,13 @@ http://127.0.0.1:28461
 - 告警持续期间不重复发送；
 - 指标恢复正常时发送一次；
 - 服务重启不会重新发送仍处于活动状态的告警；
-- 微信发送失败也不会每 15 秒重复重试。
+- 单个接收人失败不影响其他接收人。
 
 关闭即时推送后，系统仍会记录告警状态变化。重新开启不会补发关闭期间已经发生的旧变化。
 
-每日摘要默认关闭。开启后，系统会在所选时区每天到达指定时间后发送一次，内容包含 CPU、内存、磁盘、OCI 最近同步时间和当前告警数量。每日摘要使用最近一次服务器采样，不会额外触发 OCI 同步。
+每日摘要默认关闭。开启后，系统在所选时区每天到达指定时间后依次发送“运行状态”和“费用与流量”两条消息。两条消息独立去重和记录；第一条失败不会阻止第二条。日报使用现有本地数据，不会额外触发 OCI 同步。
 
-## 六、环境变量
+## 七、环境变量
 
 也可以直接编辑服务器 `.env`：
 
@@ -135,14 +197,17 @@ http://127.0.0.1:28461
 MONITOR_WECHAT_ENABLED=true
 MONITOR_WECHAT_APP_ID=wx_example_app
 MONITOR_WECHAT_APP_SECRET=replace-with-your-app-secret
-MONITOR_WECHAT_TEMPLATE_ID=template_example_01
+MONITOR_WECHAT_TEMPLATE_ID=template_example_status
+MONITOR_WECHAT_COST_TEMPLATE_ID=template_example_cost
 MONITOR_WECHAT_OPEN_IDS=openid_example_1,openid_example_2
 MONITOR_WECHAT_IMMEDIATE_PUSH_ENABLED=true
-MONITOR_WECHAT_DAILY_SUMMARY_ENABLED=false
+MONITOR_WECHAT_DAILY_SUMMARY_ENABLED=true
 MONITOR_WECHAT_DAILY_SUMMARY_TIME=09:00
 MONITOR_WECHAT_ZONE_ID=Asia/Shanghai
 MONITOR_SETTINGS_ENCRYPTION_KEY=replace-with-base64-32-byte-key
 ```
+
+`MONITOR_WECHAT_TEMPLATE_ID` 表示运行状态模板，保留该变量名是为了兼容旧版本。`MONITOR_WECHAT_COST_TEMPLATE_ID` 表示费用与流量模板。
 
 `.env` 已被 Git 忽略。不要把真实 AppID、AppSecret、Template ID、OpenID 或加密密钥写入 README、Issue、日志和公开仓库。
 
@@ -152,7 +217,28 @@ MONITOR_SETTINGS_ENCRYPTION_KEY=replace-with-base64-32-byte-key
 docker compose up -d --build
 ```
 
-## 七、常见错误
+## 八、从旧单模板配置升级
+
+旧版本只配置 `MONITOR_WECHAT_TEMPLATE_ID` 时，即时告警和恢复仍然可用，不需要更换原 Template ID。升级步骤：
+
+1. 在测试公众号或正式公众号中新增“费用与流量日报”模板。
+2. 把第二份 Template ID 填入初始化脚本、`.env` 或设置页面。
+3. 开启每日双模板摘要。
+4. 在设置页点击“测试两个模板”，确认两项结果都成功。
+
+旧版投递记录会继续显示为“历史测试”或“历史每日摘要”。
+
+## 九、域名与微信消息的边界
+
+`MONITOR_PUBLIC_URL` 只用于浏览器访问、CORS、Cookie 和服务器反向代理配置。微信公众号消息不会读取该值，也不会跳转到该地址。
+
+容器仍然不管理域名或证书。Nginx、OpenResty 或 1Panel 可以继续把域名反向代理到：
+
+```text
+http://127.0.0.1:28461
+```
+
+## 十、常见错误
 
 | 错误码 | 常见原因 | 处理方式 |
 | --- | --- | --- |
@@ -169,4 +255,4 @@ docker compose ps
 docker compose logs --tail=200 oci-arm-monitor-server
 ```
 
-日志只记录脱敏结果，不会输出 AppSecret、access token 或接收人 OpenID。
+日志只记录脱敏后的聚合结果，不保存 AppSecret、access token、OpenID 或模板消息正文。

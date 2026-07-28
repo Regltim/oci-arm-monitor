@@ -39,17 +39,18 @@ public class WechatApiClient implements WechatTemplateSender {
   public void sendTemplate(
     WechatNotificationSettings settings,
     String openId,
+    WechatTemplateType templateType,
     WechatTemplateMessage message
   ) {
     String accessToken = accessToken(settings, false);
     try {
-      sendTemplateRequest(settings, openId, message, accessToken);
+      sendTemplateRequest(settings, openId, templateType, message, accessToken);
     } catch (WechatApiException exception) {
       if (!isExpiredTokenError(exception.errorCode())) {
         throw exception;
       }
       invalidateToken(accessToken);
-      sendTemplateRequest(settings, openId, message, accessToken(settings, true));
+      sendTemplateRequest(settings, openId, templateType, message, accessToken(settings, true));
     }
   }
 
@@ -92,12 +93,13 @@ public class WechatApiClient implements WechatTemplateSender {
   private void sendTemplateRequest(
     WechatNotificationSettings settings,
     String openId,
+    WechatTemplateType templateType,
     WechatTemplateMessage message,
     String accessToken
   ) {
     String requestBody;
     try {
-      requestBody = objectMapper.writeValueAsString(templatePayload(settings, openId, message));
+      requestBody = objectMapper.writeValueAsString(templatePayload(settings, openId, templateType, message));
     } catch (JsonProcessingException exception) {
       throw new WechatApiException("微信公众号模板消息生成失败", exception);
     }
@@ -120,6 +122,7 @@ public class WechatApiClient implements WechatTemplateSender {
   private Map<String, Object> templatePayload(
     WechatNotificationSettings settings,
     String openId,
+    WechatTemplateType templateType,
     WechatTemplateMessage message
   ) {
     Map<String, Object> data = new LinkedHashMap<>();
@@ -133,8 +136,7 @@ public class WechatApiClient implements WechatTemplateSender {
 
     Map<String, Object> payload = new LinkedHashMap<>();
     payload.put("touser", openId);
-    payload.put("template_id", settings.templateId());
-    payload.put("url", settings.publicUrl());
+    payload.put("template_id", templateId(settings, templateType));
     payload.put("data", data);
     return payload;
   }
@@ -180,6 +182,7 @@ public class WechatApiClient implements WechatTemplateSender {
     upstreamMessage = redact(upstreamMessage, settings.appId());
     upstreamMessage = redact(upstreamMessage, settings.appSecret());
     upstreamMessage = redact(upstreamMessage, settings.templateId());
+    upstreamMessage = redact(upstreamMessage, settings.costTemplateId());
     upstreamMessage = redact(upstreamMessage, openId);
     if (upstreamMessage.length() > 160) {
       upstreamMessage = upstreamMessage.substring(0, 160);
@@ -197,6 +200,13 @@ public class WechatApiClient implements WechatTemplateSender {
 
   private boolean isExpiredTokenError(Integer errorCode) {
     return Integer.valueOf(40014).equals(errorCode) || Integer.valueOf(42001).equals(errorCode);
+  }
+
+  private String templateId(WechatNotificationSettings settings, WechatTemplateType templateType) {
+    return switch (templateType) {
+      case STATUS -> settings.templateId();
+      case COST_TRAFFIC -> settings.costTemplateId();
+    };
   }
 
   private synchronized void invalidateToken(String token) {

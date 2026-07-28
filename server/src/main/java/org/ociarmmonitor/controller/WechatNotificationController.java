@@ -8,6 +8,7 @@ import org.ociarmmonitor.notification.WechatNotificationService;
 import org.ociarmmonitor.notification.WechatNotificationSettingsRepository;
 import org.ociarmmonitor.notification.WechatNotificationSettingsStatus;
 import org.ociarmmonitor.notification.WechatNotificationSettingsUpdateRequest;
+import org.ociarmmonitor.notification.WechatTestDeliveryResult;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -47,9 +48,10 @@ public class WechatNotificationController {
   }
 
   @PostMapping("/test")
-  public ApiResponse<WechatDeliveryResult> sendTest() {
-    WechatDeliveryResult result = notificationService.sendTest();
-    deliveryLogRepository.save(result);
+  public ApiResponse<WechatTestDeliveryResult> sendTest() {
+    WechatTestDeliveryResult result = notificationService.sendTest();
+    deliveryLogRepository.save(result.status());
+    deliveryLogRepository.save(result.costTraffic());
     return ApiResponse.ok(result, result.message());
   }
 

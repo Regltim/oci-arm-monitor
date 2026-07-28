@@ -17,17 +17,22 @@ public class CostService {
   }
 
   public CostSummary getSummary() {
-    double ociCost = costRepository.costForCurrentMonth();
-    double manualCost = manualCostRepository.costForCurrentMonth();
+    LocalDate reportDate = LocalDate.now();
+    return getSummary(YearMonth.from(reportDate), reportDate);
+  }
+
+  public CostSummary getSummary(YearMonth month, LocalDate reportDate) {
+    double ociCost = costRepository.costForMonth(month);
+    double manualCost = manualCostRepository.costForMonth(month);
     double totalCost = ociCost + manualCost;
     return new CostSummary(
       ociCost,
       manualCost,
       totalCost,
-      estimateMonthEnd(totalCost),
+      estimateMonthEnd(totalCost, reportDate),
       "CNY",
-      costRepository.listCurrentMonth(),
-      manualCostRepository.listCurrentMonth()
+      costRepository.listMonth(month),
+      manualCostRepository.listMonth(month)
     );
   }
 
@@ -39,9 +44,8 @@ public class CostService {
     manualCostRepository.delete(id);
   }
 
-  private double estimateMonthEnd(double currentCost) {
-    LocalDate today = LocalDate.now();
-    int daysInMonth = YearMonth.from(today).lengthOfMonth();
-    return currentCost / today.getDayOfMonth() * daysInMonth;
+  private double estimateMonthEnd(double currentCost, LocalDate reportDate) {
+    int daysInMonth = YearMonth.from(reportDate).lengthOfMonth();
+    return currentCost / reportDate.getDayOfMonth() * daysInMonth;
   }
 }

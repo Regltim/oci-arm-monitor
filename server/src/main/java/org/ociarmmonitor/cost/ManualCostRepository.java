@@ -4,6 +4,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.YearMonth;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -46,7 +47,11 @@ public class ManualCostRepository {
   }
 
   public List<ManualCost> listCurrentMonth() {
-    String monthPrefix = LocalDate.now().withDayOfMonth(1).toString().substring(0, 7);
+    return listMonth(YearMonth.now());
+  }
+
+  public List<ManualCost> listMonth(YearMonth month) {
+    String monthPrefix = month.toString();
     return jdbcTemplate.query("""
       SELECT id, cost_name, category, amount, currency, occurred_on, note, created_at
       FROM manual_cost
@@ -56,7 +61,11 @@ public class ManualCostRepository {
   }
 
   public double costForCurrentMonth() {
-    String monthPrefix = LocalDate.now().withDayOfMonth(1).toString().substring(0, 7);
+    return costForMonth(YearMonth.now());
+  }
+
+  public double costForMonth(YearMonth month) {
+    String monthPrefix = month.toString();
     Double value = jdbcTemplate.queryForObject("""
       SELECT COALESCE(SUM(amount), 0)
       FROM manual_cost
